@@ -1,0 +1,16 @@
+node_modules/
+lib/
+python/.venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.claude/
+.codex/
+coverage/
+*.tgz
+.npmrc
+.pnpmrc
