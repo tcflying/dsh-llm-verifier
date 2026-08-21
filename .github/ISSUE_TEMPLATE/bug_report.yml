@@ -1,0 +1,97 @@
+name: Bug report
+description: Report a reproducible problem using sanitized evidence.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a problem. Do not include credentials, private source code, prompts, absolute local paths, or unredacted logs. For potential vulnerabilities, follow SECURITY.md.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I reproduced this in a normal, clean Git repository root.
+          required: true
+        - label: I removed credentials and private repository content from this report.
+          required: true
+        - label: This report does not contain exploit details for a security vulnerability.
+          required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and architecture
+      placeholder: macOS 15 arm64 or Ubuntu 24.04 x86_64
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Runtime versions
+      description: Include DSH, Node.js, pnpm, uv, and Python versions.
+      placeholder: |
+        dsh: 0.1.0-rc.7
+        node: 24.x
+        pnpm: 11.7.0
+        uv: ...
+        python: ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Affected operation
+      options:
+        - verified_best_of
+        - apply_verified_winner
+        - installation or configuration
+        - cleanup or artifacts
+        - development tests
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: candidates
+    attributes:
+      label: Candidate count
+      options:
+        - "3"
+        - "5"
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use a synthetic task and repository where possible. Include safe validation commands only.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized evidence
+      description: Redact secrets, private code, prompts, full paths, and proprietary logs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: cleanup
+    attributes:
+      label: Residual state
+      description: Note whether a plugin-created worktree, process, or artifact was left behind.

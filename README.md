@@ -1,101 +1,238 @@
 # dsh-llm-verifier
 
-DeepSeek Harness 开发者预览插件：让 3 个或 5 个相互隔离的 Harness 候选完成同一项编码任务，先执行项目测试，再使用 `llm-verifier` 选择最佳补丁。原项目只会在用户第二次明确授权后被修改。
+<p align="center">
+  <strong>Generate several coding-agent patches, reject the ones that fail your tests, and let an LLM verifier rank the rest before you decide whether to apply the winner.</strong>
+</p>
 
-本项目是独立插件，不依赖、不修改。
+<p align="center">
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-## 当前状态
+<p align="center">
+  <img alt="Status: developer preview" src="https://img.shields.io/badge/status-developer%20preview-orange">
+  <img alt="DeepSeek Harness 0.1.0-rc.7" src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.0--rc.7-4c6ef5">
+  <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-green"></a>
+</p>
 
-- DeepSeek Harness：固定 `0.1.0-rc.7`
-- Node.js：固定 24 LTS
-- Python：由 `uv` 管理
-- `llm-verifier`：固定 `0.2.0`
-- 平台：macOS / Linux
-- 候选数量：只支持 3 或 5，默认 3
-- 安装方式：本地路径插件，不发布 npm
+`dsh-llm-verifier` is a developer-preview plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It runs **3 or 5 independent coding candidates** in detached Git worktrees, validates every candidate against project tests, ranks the passing patches with [`llm-verifier`](https://pypi.org/project/llm-verifier/), and keeps the original checkout unchanged until a separate approval applies the selected patch.
 
-## 已实现的工具
+> [!WARNING]
+> This public version is for **trusted repositories only**. Candidate generation uses detached Git worktrees and the DeepSeek Harness `workspace-write` permission mode, but validation commands still execute code from the target repository on the host. Read the [security boundaries](#security-boundaries) before using it.
 
-### `verified_best_of`
+## Why this exists
 
-输入：
+A single coding-agent run can produce a plausible patch, yet another independent run may find a simpler fix, add better tests, or avoid a subtle regression. Running several candidates manually creates a new problem: comparing them consistently.
 
-```json
-{
-  "task": "修复用户登录失败的问题并补充测试",
-  "candidateCount": 3,
-  "validationCommands": ["pnpm test"]
-}
+This plugin turns that process into one approval-gated workflow:
+
+1. Give every candidate the same coding task.
+2. Keep candidate edits in separate detached worktrees.
+3. Run deterministic project validation before model-based ranking.
+4. Exclude candidates that fail validation.
+5. Rank the remaining patches with an LLM verifier when comparison is needed.
+6. Produce an auditable report and winner patch.
+7. Apply the winner only after a second explicit approval, then rerun validation.
+
+```mermaid
+flowchart LR
+    T[One coding task] --> C1[Candidate 1]
+    T --> C2[Candidate 2]
+    T --> C3[Candidate 3]
+    T -. Best-of-5 .-> C45[Candidates 4 and 5]
+
+    C1 --> V1{Validation}
+    C2 --> V2{Validation}
+    C3 --> V3{Validation}
+    C45 --> V45{Validation}
+
+    V1 -->|pass| R[LLM verifier or validation-only selection]
+    V2 -->|pass| R
+    V3 -->|pass| R
+    V45 -->|pass| R
+    V1 -->|fail| X[Excluded]
+    V2 -->|fail| X
+    V3 -->|fail| X
+    V45 -->|fail| X
+
+    R --> A[Report plus winner.patch]
+    A --> H{Second approval}
+    H -->|approve| P[Apply patch and rerun validation]
+    H -->|stop| U[Original checkout remains unchanged]
 ```
 
-- `candidateCount` 只能为 `3` 或 `5`，省略时为 `3`。
-- `validationCommands` 可省略。插件只在仓库根目录自动识别一种项目类型。
-- 第一次授权后创建 detached Git worktree 并并行运行候选。
-- 测试失败的候选不会进入模型排名。
-- 一个候选通过时直接胜出；两个候选使用一个 pivot；三个至五个使用两个 pivots。
-- 返回报告路径、运行编号和获胜补丁路径，但不修改原项目。
+## What you get
 
-### `apply_verified_winner`
+- **Best-of-3 or Best-of-5:** use 3 candidates by default, or 5 for higher-value tasks.
+- **Validation-first selection:** failing candidates never enter model ranking.
+- **Efficient ranking:** one passing candidate wins by validation; two use one pivot; three to five use two pivots.
+- **Two approval gates:** one before candidate execution and another before applying the winner.
+- **Integrity checks before apply:** repository path, base `HEAD`, clean state, and winner-patch SHA-256 are checked again.
+- **Auditable artifacts:** reports include rankings, changed files, timings, process status, patch hashes, verifier requests, and token usage.
+- **Credential controls:** validation processes do not receive the DeepSeek API key; logs, errors, validation output, and text diffs are redacted against the exact credential value.
+- **No automatic Git mutation:** the plugin does not commit, push, stash, reset, or automatically apply a patch.
 
-输入：
+## Current status
 
-```json
-{
-  "runId": "verified_best_of 返回的运行编号"
-}
-```
+| Item | Current public version |
+|---|---|
+| Release stage | Developer preview |
+| DeepSeek Harness | Pinned to `0.1.0-rc.7` |
+| Node.js | `24.x` |
+| Python bridge | Managed by `uv`; Python `>=3.9,<3.14` |
+| `llm-verifier` | Pinned to `0.2.0` |
+| Platforms | macOS and Linux |
+| Candidate counts | `3` or `5`; default `3` |
+| Distribution | Local-path installation after building from source |
+| License | MIT |
 
-应用前会重新检查仓库路径、HEAD、清洁状态和补丁 SHA-256，并要求第二次授权。应用后重新执行原验证命令，但不会暂存、提交、推送、stash 或 reset。
+## Quick start
 
-## 安装
+### Prerequisites
 
-本机安装使用 Node.js 24：
+Install or prepare:
+
+- DeepSeek Harness `0.1.0-rc.7`
+- Node.js 24 and pnpm `11.7.0`
+- [`uv`](https://docs.astral.sh/uv/)
+- Git
+- A DeepSeek credential available to Harness through the credential reference `DEEPSEEK_API_KEY`
+
+### 1. Clone, install, and verify
 
 ```bash
-export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH"
-node --version
-dsh --version
-pnpm --version
-```
+git clone https://github.com/Web0926/dsh-llm-verifier.git
+cd dsh-llm-verifier
 
-当前开发基线分别为 Node.js `24.19.0`（也写入 `.node-version`）、DSH `0.1.0-rc.7` 和 pnpm `11.7.0`。
-
-安装依赖并构建：
-
-```bash
-cd /path/to/dsh-llm-verifier
 pnpm install --frozen-lockfile
 uv sync --frozen --project python
 pnpm run check
 ```
 
-加入 Web profile：
+### 2. Add the local plugin to the Web profile
 
 ```bash
 dsh plugin --profile web add "$(pwd)"
 dsh plugin --profile web list
 ```
 
-启动 Harness：
+### 3. Start Harness in a clean target repository
 
 ```bash
-cd 需要处理的干净 Git 仓库
+cd /path/to/a/clean-and-trusted-git-repository
 dsh --profile web
 ```
 
-在对话中要求 Harness 调用 `verified_best_of`。看到报告后，只有确认要采用获胜方案时才调用 `apply_verified_winner`。
+Ask Harness to use the tool, for example:
 
-卸载插件：
+```text
+Use verified_best_of with 3 candidates to fix the login retry bug and add regression tests.
+Run pnpm test for validation. Do not apply the winner yet.
+```
+
+Equivalent tool input:
+
+```json
+{
+  "task": "Fix the login retry bug and add regression tests",
+  "candidateCount": 3,
+  "validationCommands": ["pnpm test"]
+}
+```
+
+The tool returns the run ID, status, eligible candidates, ranking, report path, token usage, and—when a winner exists—the local path to `winner.patch`.
+
+After reviewing the report and patch, explicitly call:
+
+```json
+{
+  "runId": "<runId returned by verified_best_of>"
+}
+```
+
+through `apply_verified_winner`. The plugin requests a separate approval before applying the patch and reruns the original validation commands afterward.
+
+### 4. Remove the plugin
 
 ```bash
 dsh plugin --profile web remove dsh-llm-verifier
 ```
 
-## 配置
+## Tools
 
-默认配置：
+### `verified_best_of`
 
-| 配置 | 默认值 |
+Runs candidate generation, validation, and winner selection without modifying the original checkout.
+
+| Parameter | Required | Description |
+|---|---:|---|
+| `task` | Yes | Coding task shared by every candidate. |
+| `candidateCount` | No | `3` or `5`; defaults to `3`. |
+| `validationCommands` | No | Explicit commands. When omitted, one supported project type is detected. |
+
+Possible run states are `winner_selected`, `no_winner`, and `failed`.
+
+### `apply_verified_winner`
+
+Applies one previously selected winner after a separate approval. Before applying, it rechecks the repository identity and state, base commit, and patch SHA-256. It then reruns the validation commands captured by the original run.
+
+## Automatic validation detection
+
+Explicit validation commands always take precedence. Without them, the plugin accepts exactly one recognized root project type:
+
+| Root markers | Command |
+|---|---|
+| `package.json`, one JavaScript package manager, and a `test` script | That package manager's `test` command |
+| `pyproject.toml` | `uv run pytest` |
+| `Cargo.toml` | `cargo test` |
+| `go.mod` | `go test ./...` |
+| `Makefile` with a `test` target | `make test` |
+
+If several project types match, several JavaScript package managers are present, or no supported type can be identified, the run fails fast and asks for explicit commands.
+
+## Security boundaries
+
+The plugin is deliberately conservative about repository mutation, credentials, and artifacts, but the current public version is **not a container boundary**.
+
+- It accepts only a normal, clean Git repository root.
+- It rejects submodules, sparse checkouts, linked worktrees, and uncommitted changes.
+- Candidate edits live under `$DSH_HOME/llm-verifier/runs/<runId>` in detached worktrees.
+- Candidate Harness processes use the explicit `workspace-write` permission mode and do not inherit the host `DSH_PERMISSION_MODE`.
+- Validation commands execute repository code on the host. Use this version only with repositories and validation commands you trust.
+- Validation processes do not receive the API key.
+- If a candidate writes the exact credential into text, binary content, or a symbolic-link target, that candidate is invalidated.
+- Binary data is never sent to the verifier; complete binary patches remain local.
+- Cancellation and timeout handling terminate the candidate process group and attempt to clean up plugin-created worktrees.
+- An apply failure is left in place for inspection; the plugin does not run `git reset` as an automatic rollback.
+
+Review every approval prompt, especially the validation commands shown before execution.
+
+## Run artifacts
+
+Each run is stored under:
+
+```text
+$DSH_HOME/llm-verifier/runs/<runId>/
+├── artifacts/
+├── manifest.json
+├── report.md
+├── winner.patch
+└── apply-result.json        # created only after an apply attempt
+```
+
+The report records candidate launch, completion, validation, and ranking counts; exit codes and durations; diff statistics; patch paths and SHA-256 values; log paths; binary-file metadata; verifier request counts; and token usage. When verifier input is truncated, the report points to the complete local artifact.
+
+## Cost awareness
+
+With the default three evaluation criteria and two repeated evaluations, a fully eligible Best-of-3 run makes about **36 verifier requests** and a Best-of-5 run about **72**. Actual counts vary with candidate eligibility and cache hits and are written to the report.
+
+Real candidate and verifier runs use paid model requests. Automated tests do not call the live DeepSeek API.
+
+## Configuration
+
+Default values:
+
+| Setting | Default |
 |---|---:|
 | `defaultCandidateCount` | `3` |
 | `candidateProfile` | `headless` |
@@ -111,7 +248,7 @@ dsh plugin --profile web remove dsh-llm-verifier
 | `maxVerifierTraceBytes` | `524288` |
 | `stateDirectory` | `$DSH_HOME/llm-verifier` |
 
-可在 Web profile 的 `cordis.patch.yml` 覆盖整段配置：
+Override the plugin entry in the Web profile's `cordis.patch.yml`:
 
 ```yaml
 - id: llm-verifier
@@ -131,58 +268,9 @@ dsh plugin --profile web remove dsh-llm-verifier
     stateDirectory: $DSH_HOME/llm-verifier
 ```
 
-`nEvaluations` 允许 1–4，`maxVerifierWorkers` 允许 1–16，`verifierEffort` 允许 `low`、`high` 或 `max`。`verifierModel` 必须以 `deepseek-` 开头，其他提供商会在输入边界直接被拒绝。
+`nEvaluations` accepts `1`–`4`, `maxVerifierWorkers` accepts `1`–`16`, and `verifierEffort` accepts `low`, `high`, or `max`. The verifier model name must begin with `deepseek-`.
 
-## 自动验证规则
-
-显式命令优先。没有显式命令时：
-
-| 根目录标识 | 命令 |
-|---|---|
-| `package.json` + 唯一包管理器 + `test` script | 对应包管理器的 `test` |
-| `pyproject.toml` | `uv run pytest` |
-| `Cargo.toml` | `cargo test` |
-| `go.mod` | `go test ./...` |
-| 带 `test` target 的 `Makefile` | `make test` |
-
-同时匹配多个类型、存在多个 JavaScript 包管理器或无法识别时，插件会立即报错，要求显式提供命令。
-
-## 安全行为
-
-- 只接受普通、干净的 Git 仓库根目录。
-- 拒绝子模块、稀疏检出、linked worktree 和未提交修改。
-- 候选工作区位于 `$DSH_HOME/llm-verifier/runs/<runId>`。
-- DeepSeek 凭据通过 `ctx.credentials` 每次操作重新解析。
-- 候选 Harness 会显式固定为 `workspace-write`，不继承宿主的 `DSH_PERMISSION_MODE`。
-- 测试进程不会收到 API Key。
-- 候选日志、错误、验证输出和文本 diff 会做精确密钥脱敏。
-- 如果候选把密钥写进文本、二进制文件或符号链接目标，整个候选立即失效。
-- 二进制内容不发送给 verifier；完整 binary patch 只保存在本地。
-- 取消和超时会终止整个候选进程组并清理插件创建的 worktree。
-- 应用失败后不会用 `reset` 自动回滚；现场会保留给用户检查。
-
-Git worktree 用于隔离候选改动，不等同于独立容器。候选工具依赖 DeepSeek Harness 的 `workspace-write` 沙箱；验证命令仍会执行仓库中的项目代码，因此只应在可信仓库中使用，并应仔细检查首次授权展示的命令。
-
-Best-of-3 在默认三项标准、两次重复下约产生 36 个 verifier 请求；Best-of-5 约产生 72 个。实际请求数受合格候选和缓存影响，并记录在报告中。
-
-## 运行产物
-
-每次运行保留：
-
-```text
-$DSH_HOME/llm-verifier/runs/<runId>/
-├── artifacts/
-├── manifest.json
-├── report.md
-├── winner.patch
-└── apply-result.json        # 仅在应用后存在
-```
-
-临时 worktree 在候选阶段结束后删除。清理失败会在报告中列出残留路径。
-
-报告和清单会记录插件版本、候选启动/完成/通过/排名数量、明确名次、进程退出码、耗时、diff stat、补丁路径与 SHA-256、完整日志路径、二进制文件的路径/大小/哈希、Verifier 实际请求数和 Token 用量。发送给 Verifier 的单候选材料超过上限时，报告会标记截断，并指向未截断的本地文件。
-
-## 开发验证
+## Development
 
 ```bash
 pnpm run typecheck
@@ -191,14 +279,20 @@ pnpm run build
 python3 -m py_compile python/verifier_bridge.py
 ```
 
-自动测试不调用真实 DeepSeek API。真实 Best-of-3 / Best-of-5 会产生费用，应由用户在明确知情后手动执行。
+The test suite covers Best-of-3 and Best-of-5 eligibility matrices, patch tampering, credential redaction, verifier failures, post-apply validation failures, binary patches, input truncation, and residual-process cleanup.
 
-测试覆盖 Best-of-3 的 3/2/1/0 个合格候选和 Best-of-5 的 5/4/3/2/1/0 个合格候选，以及补丁篡改、凭据脱敏、Verifier 故障、应用后测试失败、二进制补丁、输入截断和残留进程清理。
+See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. Bug reports should include sanitized evidence and must never include credentials or private repository content.
 
-## v1 限制
+## Current limitations
 
-- 不支持 Windows、脏工作区、子模块或稀疏检出。
-- 不支持 3 和 5 之外的候选数量。
-- 不支持自动 commit、push 或自动应用。
-- 不支持 OpenAI、Vertex、vLLM 等其他 verifier 后端。
-- 不包含 Web 自定义界面、ProgressTracker 或提前停止。
+- No Windows support.
+- No dirty worktrees, submodules, sparse checkouts, or linked worktrees.
+- Candidate count is fixed to 3 or 5.
+- No automatic commit, push, merge, or patch application.
+- No OpenAI, Vertex, vLLM, or other verifier backends.
+- No custom Web UI, ProgressTracker, or early stopping.
+- Source installation only; no npm package or prebuilt GitHub release yet.
+
+## License
+
+[MIT](LICENSE)

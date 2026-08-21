@@ -1,0 +1,9 @@
+{
+  "name": "dsh-llm-verifier-retry-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

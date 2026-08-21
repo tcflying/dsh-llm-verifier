@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose a focused improvement to the verified candidate workflow.
+title: "feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user problem first. Large architectural changes, new providers, dependency changes, and new execution backends should be discussed before implementation.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What workflow is difficult or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe observable behavior and acceptance criteria.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Areas affected
+      options:
+        - label: Candidate execution or process isolation
+        - label: Validation commands
+        - label: Approval flow
+        - label: Credentials or redaction
+        - label: Git repository mutation
+        - label: Verifier ranking or model requests
+        - label: Artifacts, retention, or cleanup
+        - label: Installation or distribution
+        - label: Documentation only
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence or example
+      description: Use synthetic examples and omit private data.
