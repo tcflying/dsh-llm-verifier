@@ -86,6 +86,52 @@ flowchart LR
 | Distribution | Local-path installation after building from source |
 | License | MIT |
 
+### Offline CI baseline
+
+The repository CI pins Ubuntu 24.04, Node 24.14.0, pnpm 11.7.0, uv 0.11.6, Python 3.13.13, and DeepSeek Harness 0.1.0-rc.7. It runs typecheck, build, and the complete deterministic test suite without referencing a DeepSeek credential or invoking a live model. See the [Phase 5 acceptance matrix](docs/acceptance/phase-5.md).
+
+## Phase 5 offline CI and evaluation boundaries
+
+### CI
+
+The offline verification path uses Node 24.14.0, pnpm 11.7.0, uv 0.11.6, and a frozen Python 3.13.13 environment. It installs only locked dependencies before running typecheck, build, and the complete test entry point. The workflow source is locally verified; a hosted GitHub Actions run has not yet been executed.
+
+### Credentials
+
+CI neither reads nor requires a real DeepSeek credential. It contains no model-provider secret reference and does not invoke the plugin tools or a live credential resolver. The Phase 5 security contract fails immediately when a forbidden credential reference or credential-like value is detected in the scanned surface; fix the source of the finding instead of bypassing that guard. Never paste a credential into an issue, log, report, or troubleshooting command.
+
+### Evaluation boundary
+
+```text
+Offline deterministic tests
+        |
+        v
+Approval required: request count, token ceiling, cost limit, stop conditions
+        |
+        v
+Real model evaluation
+```
+
+Native Best-of-N and Terminal-Bench evaluation have not been executed. They remain separately approval-gated because they use paid model requests; the budget and stopping conditions must be shown to and approved by the user first.
+
+### Isolation boundary
+
+| Layer | What it isolates | What it does not prove |
+|---|---|---|
+| Git worktree | Candidate file state from the original checkout | Process, network, credential, or container isolation |
+| Docker/container | Candidate and validation processes when a digest-pinned evaluation image is configured | That an image was executed in the current offline acceptance run; its image digest is therefore `N/A` |
+| Model execution data | Prompts, candidate traces, verifier responses, token usage, and provider-side processing from a live run | Offline tests collect no model response and upload no execution data |
+
+### Troubleshooting
+
+| Problem | Symptom | Local check | Safe next action |
+|---|---|---|---|
+| Credential detected | The security contract reports a forbidden variable name or credential-like pattern | Run `node --test tests/phase-5-security-contract.test.ts`; do not print the value | Remove the reference or fixture; if a real secret was exposed, rotate it outside this repository before continuing |
+| Dependency mismatch | A frozen install or runtime contract reports a version/lock mismatch | Compare `node -v`, `pnpm -v`, `uv --version`, and Python against the pinned versions | Restore the pinned toolchain and lockfiles; do not use an upgrade or lock rewrite as a shortcut |
+| Timeout | A candidate, verifier, Git command, or validation ends as `timed_out` or `deadline_exceeded` | Inspect the redacted report stage duration and run the full offline suite | Fix the slow command or request a separately reviewed budget change; do not disable the deadline |
+| Verifier failure | The run reports a stable verifier protocol, bridge, or response error | Inspect only redacted local logs and run the offline verifier protocol/bridge tests | Correct the malformed response, offline cache, or bridge contract; never paste raw credentials or provider output |
+| Proxy rejected | Proxy validation fails before Git, Docker, or verifier launch | Check only proxy variable names and the redacted error; never print a URL containing userinfo | Remove the invalid or duplicate proxy setting and rerun the offline environment contracts |
+
 ## Quick start
 
 ### Prerequisites
@@ -193,6 +239,8 @@ If several project types match, several JavaScript package managers are present,
 ## Security boundaries
 
 The plugin is deliberately conservative about repository mutation, credentials, and artifacts, but the current public version is **not a container boundary**.
+
+Developer Preview does not provide security isolation. Detached Git worktrees isolate file state only; they are not a security sandbox. The `workspace-write` permission mode does not isolate process privileges. Candidate generation and validation commands currently execute with the host user's privileges. Use this version only with trusted tasks and repositories. Container-based execution isolation is planned separately for Phase 1 and is not implemented in this phase.
 
 - It accepts only a normal, clean Git repository root.
 - It rejects submodules, sparse checkouts, linked worktrees, and uncommitted changes.

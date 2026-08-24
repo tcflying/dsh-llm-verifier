@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
   access,
-  chmod,
   mkdtemp,
   mkdir,
   readFile,
@@ -17,10 +16,108 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, it } from "node:test";
 
-import type { RuntimeConfig } from "../src/config.ts";
+import type { DockerRuntimeConfig, RuntimeConfig } from "../src/config.ts";
+import type { DockerExecutor } from "../src/contracts.ts";
 import { applyVerifiedWinner, runVerifiedBestOf } from "../src/core.ts";
+import type { DockerExecutionRequest, DockerExecutionResult } from "../src/docker.ts";
 
 const execFileAsync = promisify(execFile);
+const SYNTHETIC_DOCKER_CONFIG: DockerRuntimeConfig = {
+  image: "registry.test/dsh-runtime:0.1.0",
+  digest: `sha256:${"a".repeat(64)}`,
+  cpus: 2,
+  memory: "2g",
+  pidsLimit: 256,
+  network: "none",
+};
+
+type FakeCandidateExecution = (
+  request: DockerExecutionRequest,
+) => Promise<Partial<DockerExecutionResult> | void>;
+
+function dockerExecutionResult(
+  request: DockerExecutionRequest,
+  overrides: Partial<DockerExecutionResult> = {},
+): DockerExecutionResult {
+  return {
+    exitCode: 0,
+    signal: null,
+    stdout: "candidate completed\n",
+    stderr: "",
+    timedOut: false,
+    aborted: false,
+    outputLimitExceeded: false,
+    residualProcessGroupDetected: false,
+    residualProcessGroupRemaining: false,
+    terminationReason: "completed",
+    drainCompleted: true,
+    drainTimedOut: false,
+    finishedAt: 0,
+    containerId: request.containerName,
+    durationMs: 1,
+    ...overrides,
+  };
+}
+
+function createFakeDockerExecutor(executeCandidate: FakeCandidateExecution): DockerExecutor {
+  return {
+    preflight: async () => ({
+      daemonVersion: "test-daemon",
+      imageReference: `${SYNTHETIC_DOCKER_CONFIG.image}@${SYNTHETIC_DOCKER_CONFIG.digest}`,
+    }),
+    run: async (request) => dockerExecutionResult(
+      request,
+      request.executionKind === "validation"
+        ? await executeFixtureValidation(request)
+        : (await executeCandidate(request)) ?? {},
+    ),
+  };
+}
+
+function candidateNumber(request: DockerExecutionRequest): number {
+  const match = /candidate-(\d+)/u.exec(request.workspacePath);
+  if (match?.[1] === undefined) {
+    throw new Error(`candidate number missing from workspacePath=${JSON.stringify(request.workspacePath)}`);
+  }
+  return Number(match[1]);
+}
+
+async function executeFixtureValidation(
+  request: DockerExecutionRequest,
+): Promise<Partial<DockerExecutionResult>> {
+  assert.equal(request.readonlyRootfs, true);
+  assert.deepEqual(request.environment, {
+    HOME: "/home",
+    DSH_HOME: "/dsh-home",
+    TMPDIR: "/tmp",
+  });
+  const validationCommand = request.command.at(-1);
+  if (validationCommand === undefined) {
+    throw new Error("validation command is missing");
+  }
+  if (validationCommand.startsWith("case \"$PWD\" in")) {
+    return candidateNumber(request) === 1
+      ? {}
+      : { exitCode: 1, stderr: "fixture path did not match candidate-1" };
+  }
+  const requiredFiles = [...validationCommand.matchAll(/test -f ([A-Za-z0-9._/-]+)/gu)]
+    .map((match) => match[1])
+    .filter((filePath): filePath is string => filePath !== undefined);
+  if (validationCommand !== "true" && requiredFiles.length === 0) {
+    throw new Error(`unsupported fixture validation command: ${validationCommand}`);
+  }
+  for (const requiredFile of requiredFiles) {
+    try {
+      await access(join(request.workspacePath, requiredFile));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+      return { exitCode: 1, stderr: `missing fixture file: ${requiredFile}` };
+    }
+  }
+  return {};
+}
 
 async function createCleanRepository(repositoryPath: string): Promise<void> {
   await mkdir(repositoryPath, { recursive: true });
@@ -48,7 +145,10 @@ async function assertTreeDoesNotContain(rootPath: string, forbiddenText: string)
   }
 }
 
-function createRuntimeConfig(stateDirectory: string, dshExecutable: string): RuntimeConfig {
+function createRuntimeConfig(
+  stateDirectory: string,
+  dshExecutable = "/forbidden-host-candidate-dsh",
+): RuntimeConfig {
   return {
     candidateProfile: "headless",
     credentialRef: "DEEPSEEK_API_KEY",
@@ -63,6 +163,7 @@ function createRuntimeConfig(stateDirectory: string, dshExecutable: string): Run
     maxVerifierTraceBytes: 512 * 1024,
     stateDirectory,
     dshExecutable,
+    docker: SYNTHETIC_DOCKER_CONFIG,
   };
 }
 
@@ -71,33 +172,22 @@ describe("Best-of orchestration", () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-core-"));
     const repositoryPath = join(fixtureRoot, "repository");
     const stateDirectory = join(fixtureRoot, "state");
-    const fakeDshPath = join(fixtureRoot, "fake-dsh.sh");
     const credentialValue = "test-secret-that-must-not-be-written";
     await createCleanRepository(repositoryPath);
     await writeFile(join(repositoryPath, "README.md"), `${credentialValue}\n`);
     await execFileAsync("git", ["add", "README.md"], { cwd: repositoryPath });
     await execFileAsync("git", ["commit", "--quiet", "--amend", "--no-edit"], { cwd: repositoryPath });
-    await writeFile(
-      fakeDshPath,
-      [
-        "#!/bin/sh",
-        "case \"$PWD\" in",
-        "  *candidate-1)",
-        "    test \"$DSH_PERMISSION_MODE\" = workspace-write || exit 3",
-        "    printf 'winner\\n' > result.txt",
-        "    printf 'candidate one completed\\n'",
-        "    printf '%s\\n' \"$DEEPSEEK_API_KEY\" >&2",
-        "    exit 0",
-        "    ;;",
-        "  *)",
-        "    printf 'candidate failed\\n' >&2",
-        "    exit 2",
-        "    ;;",
-        "esac",
-        "",
-      ].join("\n"),
-    );
-    await chmod(fakeDshPath, 0o755);
+    const dockerExecutor = createFakeDockerExecutor(async (request) => {
+      assert.equal(request.environment.DSH_PERMISSION_MODE, "workspace-write");
+      if (candidateNumber(request) === 1) {
+        await writeFile(join(request.workspacePath, "result.txt"), "winner\n");
+        return {
+          stdout: "candidate one completed\n",
+          stderr: `${request.environment.DEEPSEEK_API_KEY}\n`,
+        };
+      }
+      return { exitCode: 2, stderr: "candidate failed\n" };
+    });
 
     const approvalReasons: string[] = [];
     try {
@@ -108,7 +198,7 @@ describe("Best-of orchestration", () => {
           validationCommands: ["cat README.md && test -f result.txt"],
           repositoryPath,
         },
-        createRuntimeConfig(stateDirectory, fakeDshPath),
+        createRuntimeConfig(stateDirectory),
         {
           requestApproval: async (reason) => {
             approvalReasons.push(reason);
@@ -117,6 +207,7 @@ describe("Best-of orchestration", () => {
           runVerifier: async () => {
             throw new Error("verifier must not run with one eligible candidate");
           },
+          dockerExecutor,
         },
       );
 
@@ -148,7 +239,7 @@ describe("Best-of orchestration", () => {
       await assert.rejects(
         applyVerifiedWinner(
           { runId: result.runId, repositoryPath },
-          createRuntimeConfig(stateDirectory, fakeDshPath),
+          createRuntimeConfig(stateDirectory),
           {
             requestApproval: async () => undefined,
             resolveCredential: async () => credentialValue,
@@ -164,7 +255,7 @@ describe("Best-of orchestration", () => {
       await assert.rejects(
         applyVerifiedWinner(
           { runId: result.runId, repositoryPath },
-          createRuntimeConfig(stateDirectory, fakeDshPath),
+          createRuntimeConfig(stateDirectory),
           {
             requestApproval: async () => undefined,
             resolveCredential: async () => credentialValue,
@@ -180,7 +271,7 @@ describe("Best-of orchestration", () => {
       await assert.rejects(
         applyVerifiedWinner(
           { runId: result.runId, repositoryPath },
-          createRuntimeConfig(stateDirectory, fakeDshPath),
+          createRuntimeConfig(stateDirectory),
           {
             requestApproval: async () => undefined,
             resolveCredential: async () => credentialValue,
@@ -193,7 +284,7 @@ describe("Best-of orchestration", () => {
 
       const applyResult = await applyVerifiedWinner(
         { runId: result.runId, repositoryPath },
-        createRuntimeConfig(stateDirectory, fakeDshPath),
+        createRuntimeConfig(stateDirectory),
         {
           requestApproval: async (reason) => {
             approvalReasons.push(reason);
@@ -222,18 +313,13 @@ describe("Best-of orchestration", () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-best-five-"));
     const repositoryPath = join(fixtureRoot, "repository");
     const stateDirectory = join(fixtureRoot, "state");
-    const fakeDshPath = join(fixtureRoot, "fake-dsh.sh");
     await createCleanRepository(repositoryPath);
-    await writeFile(
-      fakeDshPath,
-      [
-        "#!/bin/sh",
-        "basename \"$PWD\" > result.txt",
-        "printf 'candidate completed\\n'",
-        "",
-      ].join("\n"),
-    );
-    await chmod(fakeDshPath, 0o755);
+    const dockerExecutor = createFakeDockerExecutor(async (request) => {
+      await writeFile(
+        join(request.workspacePath, "result.txt"),
+        `candidate-${candidateNumber(request)}\n`,
+      );
+    });
 
     let receivedCandidateCount = 0;
     let receivedPivots = 0;
@@ -245,7 +331,7 @@ describe("Best-of orchestration", () => {
           validationCommands: ["test -f result.txt"],
           repositoryPath,
         },
-        createRuntimeConfig(stateDirectory, fakeDshPath),
+        createRuntimeConfig(stateDirectory),
         {
           requestApproval: async () => undefined,
           resolveCredential: async () => "test-secret",
@@ -260,6 +346,7 @@ describe("Best-of orchestration", () => {
               tokenUsage: { calls: 72 },
             };
           },
+          dockerExecutor,
         },
       );
 
@@ -300,22 +387,17 @@ describe("Best-of orchestration", () => {
       const fixtureRoot = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-matrix-"));
       const repositoryPath = join(fixtureRoot, "repository");
       const stateDirectory = join(fixtureRoot, "state");
-      const fakeDshPath = join(fixtureRoot, "fake-dsh.sh");
       await createCleanRepository(repositoryPath);
-      const candidateBranches = Array.from(
-        { length: matrixCase.candidateCount },
-        (_, candidateIndex) => {
-          const candidateNumber = candidateIndex + 1;
-          return candidateNumber <= matrixCase.eligibleCandidateCount
-            ? `  *candidate-${candidateNumber}) printf 'candidate-${candidateNumber}\\n' > result.txt; exit 0 ;;`
-            : `  *candidate-${candidateNumber}) exit 2 ;;`;
-        },
-      );
-      await writeFile(
-        fakeDshPath,
-        ["#!/bin/sh", "case \"$PWD\" in", ...candidateBranches, "  *) exit 3 ;;", "esac", ""].join("\n"),
-      );
-      await chmod(fakeDshPath, 0o755);
+      const dockerExecutor = createFakeDockerExecutor(async (request) => {
+        const currentCandidateNumber = candidateNumber(request);
+        if (currentCandidateNumber > matrixCase.eligibleCandidateCount) {
+          return { exitCode: 2 };
+        }
+        await writeFile(
+          join(request.workspacePath, "result.txt"),
+          `candidate-${currentCandidateNumber}\n`,
+        );
+      });
 
       let verifierCallCount = 0;
       let receivedPivots: number | null = null;
@@ -327,7 +409,7 @@ describe("Best-of orchestration", () => {
             validationCommands: ["test -f result.txt"],
             repositoryPath,
           },
-          createRuntimeConfig(stateDirectory, fakeDshPath),
+          createRuntimeConfig(stateDirectory),
           {
             requestApproval: async () => undefined,
             resolveCredential: async () => "matrix-test-secret",
@@ -349,6 +431,7 @@ describe("Best-of orchestration", () => {
                 tokenUsage: { calls: 1 },
               };
             },
+            dockerExecutor,
           },
         );
 
@@ -386,21 +469,13 @@ describe("Best-of orchestration", () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-report-"));
     const repositoryPath = join(fixtureRoot, "repository");
     const stateDirectory = join(fixtureRoot, "state");
-    const fakeDshPath = join(fixtureRoot, "fake-dsh.sh");
     await createCleanRepository(repositoryPath);
-    await writeFile(
-      fakeDshPath,
-      [
-        "#!/bin/sh",
-        "printf '%2048s' x | tr ' ' a > large.txt",
-        "printf '\\000\\001\\002' > binary.bin",
-        "printf 'candidate completed\\n'",
-        "",
-      ].join("\n"),
-    );
-    await chmod(fakeDshPath, 0o755);
+    const dockerExecutor = createFakeDockerExecutor(async (request) => {
+      await writeFile(join(request.workspacePath, "large.txt"), "a".repeat(2_048));
+      await writeFile(join(request.workspacePath, "binary.bin"), Buffer.from([0, 1, 2]));
+    });
     const runtimeConfig = {
-      ...createRuntimeConfig(stateDirectory, fakeDshPath),
+      ...createRuntimeConfig(stateDirectory),
       maxVerifierTraceBytes: 256,
     };
     const fullVerifierInputPaths: string[] = [];
@@ -430,6 +505,7 @@ describe("Best-of orchestration", () => {
               tokenUsage: { calls: 36 },
             };
           },
+          dockerExecutor,
         },
       );
 
@@ -467,20 +543,14 @@ describe("Best-of orchestration", () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-false-success-"));
     const repositoryPath = join(fixtureRoot, "repository");
     const stateDirectory = join(fixtureRoot, "state");
-    const fakeDshPath = join(fixtureRoot, "fake-dsh.sh");
     await createCleanRepository(repositoryPath);
-    await writeFile(
-      fakeDshPath,
-      [
-        "#!/bin/sh",
-        "case \"$PWD\" in",
-        "  *candidate-1) printf 'wrong output\\n' > wrong.txt; printf 'all tests passed\\n'; exit 0 ;;",
-        "  *) exit 2 ;;",
-        "esac",
-        "",
-      ].join("\n"),
-    );
-    await chmod(fakeDshPath, 0o755);
+    const dockerExecutor = createFakeDockerExecutor(async (request) => {
+      if (candidateNumber(request) !== 1) {
+        return { exitCode: 2 };
+      }
+      await writeFile(join(request.workspacePath, "wrong.txt"), "wrong output\n");
+      return { stdout: "all tests passed\n" };
+    });
 
     try {
       const result = await runVerifiedBestOf(
@@ -490,13 +560,14 @@ describe("Best-of orchestration", () => {
           validationCommands: ["test -f required.txt"],
           repositoryPath,
         },
-        createRuntimeConfig(stateDirectory, fakeDshPath),
+        createRuntimeConfig(stateDirectory),
         {
           requestApproval: async () => undefined,
           resolveCredential: async () => "false-success-secret",
           runVerifier: async () => {
             throw new Error("verifier must not run for a validation failure");
           },
+          dockerExecutor,
         },
       );
 
@@ -513,24 +584,28 @@ describe("Best-of orchestration", () => {
     }
   });
 
-  it("cancels running candidate process groups and removes their worktrees", async () => {
+  it("cancels running candidate executions and removes their worktrees", async () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-cancel-"));
     const repositoryPath = join(fixtureRoot, "repository");
     const stateDirectory = join(fixtureRoot, "state");
-    const fakeDshPath = join(fixtureRoot, "fake-dsh.sh");
     const candidateStartedPath = join(fixtureRoot, "candidate-started");
     await createCleanRepository(repositoryPath);
-    await writeFile(
-      fakeDshPath,
-      [
-        "#!/bin/sh",
-        `touch \"${candidateStartedPath}\"`,
-        "printf 'partial\\n' > result.txt",
-        "sleep 60",
-        "",
-      ].join("\n"),
-    );
-    await chmod(fakeDshPath, 0o755);
+    const dockerExecutor = createFakeDockerExecutor(async (request) => {
+      await writeFile(candidateStartedPath, "started\n");
+      await writeFile(join(request.workspacePath, "result.txt"), "partial\n");
+      return new Promise<Partial<DockerExecutionResult>>((resolveExecution) => {
+        const resolveCancelled = (): void => resolveExecution({
+          exitCode: null,
+          aborted: true,
+          stdout: "partial\n",
+        });
+        if (request.signal.aborted) {
+          resolveCancelled();
+          return;
+        }
+        request.signal.addEventListener("abort", resolveCancelled, { once: true });
+      });
+    });
     const abortController = new AbortController();
 
     try {
@@ -542,13 +617,14 @@ describe("Best-of orchestration", () => {
           repositoryPath,
           signal: abortController.signal,
         },
-        createRuntimeConfig(stateDirectory, fakeDshPath),
+        createRuntimeConfig(stateDirectory),
         {
           requestApproval: async () => undefined,
           resolveCredential: async () => "cancel-test-secret",
           runVerifier: async () => {
             throw new Error("verifier must not run after cancellation");
           },
+          dockerExecutor,
         },
       );
       for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -587,24 +663,17 @@ describe("Best-of orchestration", () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-secret-"));
     const repositoryPath = join(fixtureRoot, "repository");
     const stateDirectory = join(fixtureRoot, "state");
-    const fakeDshPath = join(fixtureRoot, "fake-dsh.sh");
     const credentialValue = "credential-must-never-persist";
     await createCleanRepository(repositoryPath);
-    await writeFile(
-      fakeDshPath,
-      [
-        "#!/bin/sh",
-        "case \"$PWD\" in",
-        "  *candidate-1)",
-        "    printf '%s' \"$DEEPSEEK_API_KEY\" > leaked.bin",
-        "    exit 0",
-        "    ;;",
-        "  *) exit 2 ;;",
-        "esac",
-        "",
-      ].join("\n"),
-    );
-    await chmod(fakeDshPath, 0o755);
+    const dockerExecutor = createFakeDockerExecutor(async (request) => {
+      if (candidateNumber(request) !== 1) {
+        return { exitCode: 2 };
+      }
+      await writeFile(
+        join(request.workspacePath, "leaked.bin"),
+        request.environment.DEEPSEEK_API_KEY ?? "",
+      );
+    });
 
     try {
       const result = await runVerifiedBestOf(
@@ -614,13 +683,14 @@ describe("Best-of orchestration", () => {
           validationCommands: ["test -f leaked.bin"],
           repositoryPath,
         },
-        createRuntimeConfig(stateDirectory, fakeDshPath),
+        createRuntimeConfig(stateDirectory),
         {
           requestApproval: async () => undefined,
           resolveCredential: async () => credentialValue,
           runVerifier: async () => {
             throw new Error("verifier must not run without eligible candidates");
           },
+          dockerExecutor,
         },
       );
 
@@ -640,18 +710,13 @@ describe("Best-of orchestration", () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-api-failure-"));
     const repositoryPath = join(fixtureRoot, "repository");
     const stateDirectory = join(fixtureRoot, "state");
-    const fakeDshPath = join(fixtureRoot, "fake-dsh.sh");
     await createCleanRepository(repositoryPath);
-    await writeFile(
-      fakeDshPath,
-      [
-        "#!/bin/sh",
-        "basename \"$PWD\" > result.txt",
-        "exit 0",
-        "",
-      ].join("\n"),
-    );
-    await chmod(fakeDshPath, 0o755);
+    const dockerExecutor = createFakeDockerExecutor(async (request) => {
+      await writeFile(
+        join(request.workspacePath, "result.txt"),
+        `candidate-${candidateNumber(request)}\n`,
+      );
+    });
 
     try {
       const result = await runVerifiedBestOf(
@@ -661,13 +726,14 @@ describe("Best-of orchestration", () => {
           validationCommands: ["test -f result.txt"],
           repositoryPath,
         },
-        createRuntimeConfig(stateDirectory, fakeDshPath),
+        createRuntimeConfig(stateDirectory),
         {
           requestApproval: async () => undefined,
           resolveCredential: async () => "test-secret",
           runVerifier: async () => {
             throw new Error("verifier service unavailable");
           },
+          dockerExecutor,
         },
       );
 
@@ -689,21 +755,14 @@ describe("Best-of orchestration", () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-post-apply-"));
     const repositoryPath = join(fixtureRoot, "repository");
     const stateDirectory = join(fixtureRoot, "state");
-    const fakeDshPath = join(fixtureRoot, "fake-dsh.sh");
     await createCleanRepository(repositoryPath);
-    await writeFile(
-      fakeDshPath,
-      [
-        "#!/bin/sh",
-        "case \"$PWD\" in",
-        "  *candidate-1) printf 'winner\\n' > result.txt; exit 0 ;;",
-        "  *) exit 2 ;;",
-        "esac",
-        "",
-      ].join("\n"),
-    );
-    await chmod(fakeDshPath, 0o755);
-    const runtimeConfig = createRuntimeConfig(stateDirectory, fakeDshPath);
+    const dockerExecutor = createFakeDockerExecutor(async (request) => {
+      if (candidateNumber(request) !== 1) {
+        return { exitCode: 2 };
+      }
+      await writeFile(join(request.workspacePath, "result.txt"), "winner\n");
+    });
+    const runtimeConfig = createRuntimeConfig(stateDirectory);
 
     try {
       const selectionResult = await runVerifiedBestOf(
@@ -720,6 +779,7 @@ describe("Best-of orchestration", () => {
           runVerifier: async () => {
             throw new Error("verifier must not run with one eligible candidate");
           },
+          dockerExecutor,
         },
       );
       const applyResult = await applyVerifiedWinner(

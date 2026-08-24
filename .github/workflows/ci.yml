@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-contracts:
+    name: Offline contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm and Node.js
+        uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2
+        with:
+          version: "11.7.0"
+          runtime: "node@24.14.0"
+          install: false
+          cache: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.6"
+          python-version: "3.13.13"
+          enable-cache: false
+
+      - name: Record toolchain versions
+        run: |
+          node --version
+          pnpm --version
+          uv --version
+          python --version
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the pinned DeepSeek Harness
+        run: pnpm add --global @deepseek-ai/dsh@0.1.0-rc.7
+
+      - name: Prepare the pinned Python bridge environment
+        run: uv sync --frozen --project python
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Run offline tests
+        run: pnpm test
+        env:
+          UV_OFFLINE: "1"

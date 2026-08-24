@@ -1,4 +1,9 @@
-import type { CandidateCount } from "./config.ts";
+import type { CandidateCount, DockerRuntimeConfig } from "./config.ts";
+import type {
+  DockerExecutionRequest,
+  DockerExecutionResult,
+  DockerPreflightResult,
+} from "./docker.ts";
 
 export type JsonValue =
   | boolean
@@ -18,6 +23,33 @@ export interface BinaryFileSummary {
   readonly state: "deleted" | "present";
 }
 
+export interface TraceSectionMetadata {
+  readonly name: string;
+  readonly startByte: number;
+  readonly endByteExclusive: number;
+  readonly totalBytes: number;
+}
+
+export interface TraceEnvelope {
+  readonly totalBytes: number;
+  readonly retainedBytes: number;
+  readonly truncated: boolean;
+  readonly head: Buffer;
+  readonly tail: Buffer;
+  readonly sections: readonly TraceSectionMetadata[];
+  readonly artifactSha256: string | null;
+}
+
+export interface TraceEnvelopeMetadata {
+  readonly totalBytes: number;
+  readonly retainedBytes: number;
+  readonly truncated: boolean;
+  readonly headBytes: number;
+  readonly tailBytes: number;
+  readonly sections: readonly TraceSectionMetadata[];
+  readonly artifactSha256: string | null;
+}
+
 export interface CandidateResult {
   readonly candidateId: string;
   readonly executionStatus: ExecutionStatus;
@@ -30,6 +62,7 @@ export interface CandidateResult {
   readonly diffStat: string;
   readonly verifierTrace: string;
   readonly verifierTraceTruncated: boolean;
+  readonly verifierTraceMetadata: TraceEnvelopeMetadata;
   readonly patchPath: string | null;
   readonly patchSha256: string | null;
   readonly logPaths: string[];
@@ -78,6 +111,8 @@ export interface VerifierRequest {
   readonly nEvaluations: number;
   readonly maxWorkers: number;
   readonly cachePath: string;
+  readonly deadlineAt: number;
+  readonly timeoutMs: number;
   readonly signal: AbortSignal;
 }
 
@@ -90,10 +125,16 @@ export interface VerifierResponse {
   readonly diagnostics?: string;
 }
 
+export interface DockerExecutor {
+  preflight(config: DockerRuntimeConfig): Promise<DockerPreflightResult>;
+  run(request: DockerExecutionRequest): Promise<DockerExecutionResult>;
+}
+
 export interface RuntimeDependencies {
   readonly requestApproval: (reason: string, signal: AbortSignal) => Promise<void>;
   readonly resolveCredential: () => Promise<string>;
   readonly runVerifier: (request: VerifierRequest) => Promise<VerifierResponse>;
+  readonly dockerExecutor: DockerExecutor;
 }
 
 export interface ApplyRuntimeDependencies {

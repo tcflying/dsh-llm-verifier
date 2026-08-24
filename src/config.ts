@@ -1,5 +1,14 @@
 export type CandidateCount = 3 | 5;
 
+export interface DockerRuntimeConfig {
+  readonly image: string;
+  readonly digest: string;
+  readonly cpus: number;
+  readonly memory: string;
+  readonly pidsLimit: number;
+  readonly network: "none";
+}
+
 export interface RuntimeConfig {
   readonly candidateProfile: string;
   readonly credentialRef: string;
@@ -15,6 +24,7 @@ export interface RuntimeConfig {
   readonly stateDirectory: string;
   readonly dshExecutable: string;
   readonly dshHomeDirectory?: string;
+  readonly docker?: DockerRuntimeConfig;
 }
 
 export function normalizeCandidateCount(

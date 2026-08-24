@@ -86,6 +86,52 @@ flowchart LR
 | 分发方式 | 从源码构建后，通过本地路径安装 |
 | License | MIT |
 
+### 离线 CI 基线
+
+仓库 CI 固定 Ubuntu 24.04、Node 24.14.0、pnpm 11.7.0、uv 0.11.6、Python 3.13.13 和 DeepSeek Harness 0.1.0-rc.7。CI 会执行类型检查、构建和完整确定性测试，不引用 DeepSeek 凭据，也不调用真实模型。逐项证据见 [Phase 5 验收矩阵](docs/acceptance/phase-5.md)。
+
+## Phase 5 离线 CI 与评测边界
+
+### CI
+
+离线验证路径使用 Node 24.14.0、pnpm 11.7.0、uv 0.11.6 和冻结的 Python 3.13.13 环境。它只安装锁文件确定的依赖，然后执行类型检查、构建和完整测试入口。工作流源码已通过本地验证，但尚未实际运行 GitHub Actions hosted CI。
+
+### 凭据
+
+CI 不读取、也不需要真实 DeepSeek 凭据。它不引用模型供应商 secret，不调用插件工具，也不调用真实凭据解析器。Phase 5 安全合同一旦在扫描范围发现被禁止的凭据引用或疑似凭据值就立即失败；应修复命中来源，不得绕过门禁。不要把凭据粘贴到 issue、日志、报告或故障排查命令中。
+
+### 评测边界
+
+```text
+离线确定性测试
+        |
+        v
+需要审批：请求数、Token 上限、费用上限、停止条件
+        |
+        v
+真实模型评测
+```
+
+原生 Best-of-N 和 Terminal-Bench 评测均未执行。它们会产生付费模型请求，因此必须单独经过审批；执行前先向用户展示预算与停止条件并取得明确同意。
+
+### 隔离边界
+
+| 层级 | 能隔离什么 | 不能证明什么 |
+|---|---|---|
+| Git worktree | 将候选文件状态与原始 checkout 分开 | 不能隔离进程、网络、凭据或容器 |
+| Docker/container | 配置 digest 固定的评测镜像后，隔离候选和验证进程 | 不能证明本次离线验收执行过镜像；因此当前 image digest 为 `N/A` |
+| 模型执行数据 | 真实运行产生的提示词、候选轨迹、Verifier 响应、Token 用量和供应商侧处理 | 离线测试不采集模型响应，也不上传执行数据 |
+
+### 故障排查
+
+| 问题 | 表现 | 本地检查 | 安全的下一步 |
+|---|---|---|---|
+| 检测到凭据 | 安全合同报告被禁止的变量名或疑似凭据模式 | 运行 `node --test tests/phase-5-security-contract.test.ts`，不要打印变量值 | 移除引用或 fixture；若真实 secret 已暴露，先在仓库外轮换，再继续 |
+| 依赖不匹配 | frozen 安装或运行时合同报告版本/锁文件不一致 | 将 `node -v`、`pnpm -v`、`uv --version` 和 Python 与固定版本比较 | 恢复固定工具链与锁文件；不要用升级或重写锁文件绕过问题 |
+| 超时 | 候选、Verifier、Git 命令或验证返回 `timed_out` / `deadline_exceeded` | 查看脱敏报告的阶段耗时并运行完整离线测试 | 修复慢命令，或单独申请调整预算；不要禁用 deadline |
+| Verifier 失败 | 运行返回稳定的 Verifier protocol、bridge 或 response 错误 | 只检查脱敏本地日志，并运行离线 Verifier 协议/bridge 测试 | 修复畸形响应、离线缓存或 bridge 合同；不要粘贴原始凭据或供应商输出 |
+| 代理被拒绝 | 在 Git、Docker 或 Verifier 启动前即代理校验失败 | 只检查代理变量名和脱敏错误，不要打印含 userinfo 的 URL | 移除无效或重复代理设置，再运行离线环境合同测试 |
+
 ## 快速开始
 
 ### 前置条件
@@ -193,6 +239,8 @@ dsh plugin --profile web remove dsh-llm-verifier
 ## 安全边界
 
 插件对仓库修改、凭据和产物采取保守策略，但当前公开版本尚未形成容器级隔离边界。
+
+Developer Preview 不提供安全隔离。detached Git worktree 只隔离文件状态，并不是安全沙箱；`workspace-write` 权限模式不隔离进程权限。候选生成和验证命令当前仍以宿主用户权限执行。仅应在可信任务和可信仓库中使用。容器化执行隔离属于后续单独规划的 Phase 1，当前阶段尚未实现。
 
 - 只接受普通、干净的 Git 仓库根目录。
 - 拒绝子模块、稀疏检出、linked worktree 和未提交修改。

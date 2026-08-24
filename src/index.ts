@@ -6,8 +6,9 @@ import z from "@deepseek-ai/schemastery";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { CandidateCount, RuntimeConfig } from "./config.ts";
+import type { CandidateCount, DockerRuntimeConfig, RuntimeConfig } from "./config.ts";
 import { applyVerifiedWinner, runVerifiedBestOf } from "./core.ts";
+import { preflightDockerRuntime, runDockerContainer } from "./docker.ts";
 import { runPythonVerifier } from "./verifier.ts";
 
 export const name = "llm-verifier";
@@ -28,9 +29,10 @@ export interface Config {
   readonly runTimeoutMs?: number;
   readonly maxVerifierTraceBytes?: number;
   readonly stateDirectory?: string;
+  readonly docker?: DockerRuntimeConfig | undefined;
 }
 
-export const Config = z.object({
+export const Config: Schemastery<Config, Config> = z.object({
   defaultCandidateCount: z.union([z.const(3), z.const(5)]).default(3),
   candidateProfile: z.string().default("headless"),
   credentialRef: z.string().default("DEEPSEEK_API_KEY"),
@@ -48,6 +50,17 @@ export const Config = z.object({
   runTimeoutMs: z.natural().min(1).default(45 * 60 * 1_000),
   maxVerifierTraceBytes: z.natural().min(1).default(512 * 1_024),
   stateDirectory: z.string().default("$DSH_HOME/llm-verifier"),
+  docker: z.union([
+    z.object({
+      image: z.string().required(),
+      digest: z.string().required(),
+      cpus: z.number().min(0.01).required(),
+      memory: z.string().required(),
+      pidsLimit: z.natural().min(1).required(),
+      network: z.const("none").required(),
+    }),
+    z.const(undefined),
+  ]),
 });
 
 function expandStateDirectory(configuredStateDirectory: string, dshHomeDirectory: string): string {
@@ -99,6 +112,7 @@ function resolvePluginConfig(config: Config): {
       ),
       dshExecutable: "dsh",
       dshHomeDirectory,
+      ...(config.docker === undefined ? {} : { docker: config.docker }),
     },
   };
 }
@@ -297,6 +311,10 @@ export function apply(ctx: Context, config: Config = {}): void {
               credentialValue: operationCredential,
             });
           },
+          dockerExecutor: {
+            preflight: (dockerConfig) => preflightDockerRuntime(dockerConfig),
+            run: runDockerContainer,
+          },
         },
       );
     },
@@ -324,7 +342,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         ].filter((line) => line.length > 0).join("\n"),
       }],
     },
-    timeoutMs: runtimeConfig.validationTimeoutMs * 10 + 60_000,
+    timeoutMs: runtimeConfig.runTimeoutMs + 60_000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
       const repositoryPath = exec.agent?.session.header.cwd;
@@ -362,5 +380,3 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
   }));
 }
-
-export default apply;

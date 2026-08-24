@@ -9,6 +9,7 @@ import { describe, it } from "node:test";
 import { inspectRepository } from "../src/git.ts";
 
 const execFileAsync = promisify(execFile);
+const TEST_GIT_OPTIONS = { timeoutMs: 10_000 } as const;
 
 async function createCleanRepository(): Promise<string> {
   const repositoryPath = await mkdtemp(join(tmpdir(), "dsh-llm-verifier-git-"));
@@ -25,7 +26,7 @@ describe("repository preflight", () => {
   it("accepts a clean repository root and rejects later modifications", async () => {
     const repositoryPath = await createCleanRepository();
     try {
-      const snapshot = await inspectRepository(repositoryPath);
+      const snapshot = await inspectRepository(repositoryPath, TEST_GIT_OPTIONS);
       const { stdout: expectedCommit } = await execFileAsync("git", ["rev-parse", "HEAD"], {
         cwd: repositoryPath,
       });
@@ -34,7 +35,7 @@ describe("repository preflight", () => {
 
       await writeFile(join(repositoryPath, "README.md"), "changed\n");
       await assert.rejects(
-        inspectRepository(repositoryPath),
+        inspectRepository(repositoryPath, TEST_GIT_OPTIONS),
         /repository must be clean; git status reported: M README\.md/,
       );
     } finally {
