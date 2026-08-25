@@ -436,7 +436,7 @@ describe("loader contract", () => {
     }
 
     const loaderModule = await import(pathToFileURL(loaderResolved).href);
-    const builtModule = await import("../lib/index.js");
+    const builtModule = await import(new URL("../lib/index.js", import.meta.url).href);
     const unwrapped = getLoaderPrototype(loaderModule).unwrapExports(builtModule);
 
     assert.equal(unwrapped, builtModule);
