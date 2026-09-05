@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, lstat, mkdir, readFile, realpath, statfs, writeFile } from "node:fs/promises";
+import { access, copyFile, lstat, mkdir, readFile, realpath, rm, statfs, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -8,6 +8,7 @@ import type { CandidateCount, RuntimeConfig } from "./config.ts";
 import { normalizeCandidateCount } from "./config.ts";
 import type {
   CandidateResult,
+  RollbackResult,
   ApplyVerifiedWinnerResult,
   ApplyRuntimeDependencies,
   PublicCandidateResult,
@@ -1101,7 +1102,7 @@ export async function applyVerifiedWinner(
         : "",
     ].filter((part) => part.length > 0).join("\n"), credentialValue);
     const validationLogPath = join(runDirectory, `apply-validation-${commandIndex + 1}.log`);
-    await writePrivateTextFile(validationLogPath, validationLog);
+    await writeFile(validationLogPath, validationLog, { encoding: "utf8", mode: 0o600 });
     validationLogPaths.push(validationLogPath);
     if (validationResult.timedOut || validationResult.aborted) {
       validationStatus = "timed_out";
@@ -1136,4 +1137,52 @@ export async function applyVerifiedWinner(
     `${JSON.stringify(applyResult, null, 2)}\n`,
   );
   return applyResult;
+}
+
+export async function rollbackVerifiedWinner(
+  input: ApplyVerifiedWinnerInput,
+  config: RuntimeConfig,
+): Promise<RollbackResult> {
+  const runId = input.runId;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(runId)) {
+    throw new Error(`invalid runId: expected a UUID v4, got ${JSON.stringify(runId)}`);
+  }
+  const stateDirectory = config.stateDirectory;
+  const runDirectory = join(stateDirectory, "runs", runId);
+  const applyResultPath = join(runDirectory, "apply-result.json");
+  let applyResult: ApplyVerifiedWinnerResult;
+  try {
+    applyResult = JSON.parse(await readFile(applyResultPath, "utf8"));
+  } catch {
+    throw new Error(`no apply-result.json found for run ${runId}: nothing to rollback`);
+  }
+  if (applyResult.status !== "applied" && applyResult.status !== "applied_validation_failed") {
+    throw new Error(`run ${runId} was not applied (status: ${applyResult.status}); nothing to rollback`);
+  }
+  const changedFiles = applyResult.changedFiles;
+  await runGit(input.repositoryPath, ["checkout", "HEAD", "--", ...changedFiles]);
+  for (const file of changedFiles) {
+    const filePath = join(input.repositoryPath, file);
+    try {
+      await access(filePath, constants.F_OK);
+    } catch {
+      continue;
+    }
+    const statusOutput = await runGit(input.repositoryPath, ["status", "--porcelain", "--", file]);
+    if (statusOutput.trim().startsWith("??")) {
+      await rm(filePath);
+    }
+  }
+  const rollbackResult: RollbackResult = {
+    schemaVersion: 1,
+    runId,
+    status: "rolled_back",
+    changedFiles,
+    failure: null,
+  };
+  await writeFile(
+    join(runDirectory, "rollback-result.json"),
+    JSON.stringify(rollbackResult, null, 2),
+  );
+  return rollbackResult;
 }

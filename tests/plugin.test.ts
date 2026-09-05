@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { apply } from "../src/index.ts";
 
 describe("Cordis plugin", () => {
-  it("registers the two public tools", () => {
+  it("registers the three public tools", () => {
     const registeredToolNames: string[] = [];
     const context = {
       tools: {
@@ -16,7 +16,7 @@ describe("Cordis plugin", () => {
 
     apply(context as never, {});
 
-    assert.deepEqual(registeredToolNames, ["verified_best_of", "apply_verified_winner"]);
+    assert.deepEqual(registeredToolNames, ["verified_best_of", "rollback_verified_winner", "apply_verified_winner"]);
   });
 
   it("rejects a verifier model from another provider", () => {

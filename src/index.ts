@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { CandidateCount, RuntimeConfig } from "./config.ts";
-import { applyVerifiedWinner, runVerifiedBestOf } from "./core.ts";
+import { applyVerifiedWinner, rollbackVerifiedWinner, runVerifiedBestOf } from "./core.ts";
 import { runPythonVerifier } from "./verifier.ts";
 
 export const name = "llm-verifier";
@@ -305,7 +305,52 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
   }));
 
+
+
   ctx.tools.register(defineTool({
+    name: "rollback_verified_winner",
+    description: "Revert the changes applied by a previous apply_verified_winner call. Only works after an apply has been executed.",
+    parameters: {
+      runId: {
+        type: "string",
+        required: true,
+        description: "The runId of the previously applied verified_best_of run.",
+      },
+    },
+    output: {
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          schemaVersion: { type: "integer", const: 1, required: true },
+          runId: { type: "string", required: true },
+          status: { type: "string", const: "rolled_back", required: true },
+          changedFiles: { type: "array", items: { type: "string" }, required: true },
+          failure: { oneOf: [{ type: "string" }, { type: "null" }], required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: "text",
+        text: [
+          `Rollback result: ${value.status}.`,
+          `Reverted files: ${value.changedFiles.join(", ")}.`,
+          value.failure === null ? "" : `Failure: ${value.failure}`,
+        ].filter((line) => line.length > 0).join(String.fromCharCode(10)),
+      }],
+    },
+    timeoutMs: runtimeConfig.validationTimeoutMs + 60_000,
+    isConcurrencySafe: () => false,
+    async execute(args, exec) {
+      const repositoryPath = exec.agent?.session.header.cwd;
+      if (repositoryPath === undefined) {
+        throw new Error("rollback_verified_winner requires a calling agent with a session cwd");
+      }
+      return rollbackVerifiedWinner(
+        { runId: args.runId, repositoryPath, signal: exec.signal },
+        runtimeConfig,
+      );
+    },
+  }));  ctx.tools.register(defineTool({
     name: "apply_verified_winner",
     description: "After a separate approval, apply one previously verified winner patch and rerun its validation commands.",
     parameters: {

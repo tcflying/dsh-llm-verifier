@@ -111,3 +111,11 @@ export interface ApplyVerifiedWinnerResult {
   readonly validationLogPaths: string[];
   readonly failure: string | null;
 }
+
+export interface RollbackResult {
+  readonly schemaVersion: 1;
+  readonly runId: string;
+  readonly status: "rolled_back";
+  readonly changedFiles: string[];
+  readonly failure: string | null;
+}
