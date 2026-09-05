@@ -27,6 +27,11 @@ import {
 import { redactSecret, runProcess, sanitizedEnvironment } from "./process.ts";
 import { resolveValidationCommands } from "./validation.ts";
 
+function progress(message: string): void {
+  process.stderr.write(`[llm-verifier] ${new Date().toISOString()} ${message}
+`);
+}
+
 const MINIMUM_FREE_BYTES_PER_CANDIDATE = 512 * 1024 * 1024;
 const CREDENTIAL_REFERENCE = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const MAX_TASK_CHARACTERS = 100_000;
@@ -528,6 +533,8 @@ function publicCandidate(candidate: CandidateResult): PublicCandidateResult {
     validationStatus: candidate.validationStatus,
     score: candidate.score,
     changedFiles: candidate.changedFiles,
+    diffStat: candidate.diffStat,
+    durationMs: candidate.durationMs,
     failure: candidate.failure,
   };
 }
@@ -650,6 +657,7 @@ export async function runVerifiedBestOf(
 
   try {
   const runId = randomUUID();
+  progress(`run ${runId} starting: ${candidateCount} candidates, validation: ${validationCommands.join("; ")}`);
   const runDirectory = join(stateDirectory, "runs", runId);
   const worktreesDirectory = join(runDirectory, "worktrees");
   const artifactsDirectory = join(runDirectory, "artifacts");
@@ -663,11 +671,14 @@ export async function runVerifiedBestOf(
     for (let candidateNumber = 1; candidateNumber <= candidateCount; candidateNumber += 1) {
       const candidateId = `candidate-${candidateNumber}`;
       const worktreePath = join(worktreesDirectory, candidateId);
+      progress(`creating worktree ${candidateNumber}/${candidateCount}`);
       await createDetachedWorktree(repository, worktreePath, runAbortController.signal);
       worktreePaths.push(worktreePath);
     }
+    progress(`launching ${candidateCount} candidates in parallel`);
     candidateResults = await Promise.all(worktreePaths.map((worktreePath, candidateIndex) => {
       const candidateId = `candidate-${candidateIndex + 1}`;
+      progress(`candidate ${candidateId} started`);
       return executeCandidate({
         candidateId,
         worktreePath,
@@ -698,9 +709,13 @@ export async function runVerifiedBestOf(
     }
   }
 
+  for (const candidate of candidateResults) {
+    progress(`candidate ${candidate.candidateId}: ${candidate.executionStatus}/${candidate.validationStatus} (${candidate.durationMs}ms)`);
+  }
   const eligibleCandidates = candidateResults.filter(
     (candidate) => candidate.executionStatus === "completed" && candidate.validationStatus === "passed",
   );
+  progress(`${eligibleCandidates.length}/${candidateResults.length} candidates eligible`);
   let status: VerifiedBestOfResult["status"] = "no_winner";
   let selectionMethod: VerifiedBestOfResult["selectionMethod"] = null;
   let winner: CandidateResult | undefined;
@@ -812,6 +827,7 @@ export async function runVerifiedBestOf(
     winnerPatchSha256 = winner.patchSha256;
   }
 
+  progress(`run ${runId} complete: status=${status}, winner=${winner?.candidateId ?? "none"}`);
   const reportPath = join(runDirectory, "report.md");
   const result: VerifiedBestOfResult = {
     schemaVersion: 1,

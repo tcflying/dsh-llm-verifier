@@ -44,6 +44,8 @@ export interface PublicCandidateResult {
   readonly validationStatus: ValidationStatus;
   readonly score: number | null;
   readonly changedFiles: string[];
+  readonly diffStat: string;
+  readonly durationMs: number;
   readonly failure: string | null;
 }
 

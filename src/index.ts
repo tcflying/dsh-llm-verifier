@@ -161,7 +161,7 @@ const verifiedBestOfOutputSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        properties: candidateOutputProperties,
+        properties: { ...candidateOutputProperties, diffStat: { type: "string" }, durationMs: { type: "integer" } },
       },
       required: true,
     },
@@ -243,6 +243,13 @@ export function apply(ctx: Context, config: Config = {}): void {
           `Verified Best-of-${value.requestedCandidateCount}: ${value.status}.`,
           `Winner: ${value.winnerId ?? "none"}.`,
           `Eligible candidates: ${value.eligibleCandidateCount}.`,
+          ...value.ranking.map((r) => {
+            const parts = [`  ${r.candidateId}: ${r.executionStatus}/${r.validationStatus}`];
+            if (r.changedFiles.length > 0) parts.push(`files: ${r.changedFiles.join(", ")}`);
+            if (r.diffStat) parts.push(r.diffStat);
+            if (r.failure) parts.push(`FAIL: ${r.failure.slice(0, 100)}`);
+            return parts.join(" | ");
+          }),
           `Report: ${value.reportPath}.`,
           value.winnerPatchPath === null ? "No patch is available." : `Patch: ${value.winnerPatchPath}. Apply only with apply_verified_winner.`,
           value.failure === null ? "" : `Failure: ${value.failure}`,
