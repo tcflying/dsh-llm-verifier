@@ -252,6 +252,11 @@ export function apply(ctx: Context, config: Config = {}): void {
           }),
           `Report: ${value.reportPath}.`,
           value.winnerPatchPath === null ? "No patch is available." : `Patch: ${value.winnerPatchPath}. Apply only with apply_verified_winner.`,
+          ...(value.selectionMethod === "parent_agent_review" && value.eligibleCandidateCount > 0 ? [
+            "SELECTION METHOD: parent_agent_review. You (the parent agent) should review each candidate's changes and decide which is best.",
+            `To select a different candidate, call apply_verified_winner with candidateId set to the preferred candidate ID.`,
+            `Available candidates: ${value.ranking.map((r) => r.candidateId).join(", ")}.`,
+          ] : []),
           value.failure === null ? "" : `Failure: ${value.failure}`,
         ].filter((line) => line.length > 0).join("\n"),
       }],
