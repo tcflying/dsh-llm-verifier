@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, realpath, statfs, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import type { CandidateCount, RuntimeConfig } from "./config.ts";
 import { normalizeCandidateCount } from "./config.ts";
@@ -29,7 +29,7 @@ import { resolveValidationCommands } from "./validation.ts";
 const MINIMUM_FREE_BYTES_PER_CANDIDATE = 512 * 1024 * 1024;
 const CREDENTIAL_REFERENCE = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const MAX_TASK_CHARACTERS = 100_000;
-const PLUGIN_VERSION = "0.1.0";
+const PLUGIN_VERSION = "0.2.0";
 
 export interface RunVerifiedBestOfInput {
   readonly task: string;
@@ -42,6 +42,7 @@ export interface RunVerifiedBestOfInput {
 export interface ApplyVerifiedWinnerInput {
   readonly runId: string;
   readonly repositoryPath: string;
+  readonly candidateId?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -100,7 +101,7 @@ async function canonicalStateDirectory(
       throw error;
     }
     const stateDirectoryParent = await realpath(dirname(resolvedStateDirectory));
-    stateDirectory = join(stateDirectoryParent, resolvedStateDirectory.split("/").at(-1) ?? "");
+    stateDirectory = join(stateDirectoryParent, basename(resolvedStateDirectory));
   }
   if (isPathInside(repositoryPath, stateDirectory)) {
     throw new Error(
@@ -196,6 +197,34 @@ function failureMessage(error: unknown, credentialValue: string): string {
   return redactSecret(message, credentialValue);
 }
 
+/**
+ * Headless stderr contract (DeepSeek Harness 0.1.2): reasoning deltas are
+ * streamed as `dsh: reasoning: ...` and failures are reported as
+ * `dsh: <code>: <message>`. Reasoning on a failed run is diagnostic noise, not
+ * the failure itself, so prefer the structured failure lines when present.
+ */
+function extractHeadlessFailureDiagnostic(standardError: string): string | null {
+  const failureLines = standardError
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^dsh:/.test(line) && !line.startsWith("dsh: reasoning:"));
+  return failureLines.length === 0 ? null : failureLines.join("\n");
+}
+
+/**
+ * Validation commands run through the platform shell: POSIX gets /bin/sh, and
+ * Windows gets cmd.exe with the documented /d /s /c argument shape.
+ */
+function validationShellInvocation(validationCommand: string): {
+  readonly executable: string;
+  readonly arguments: readonly string[];
+} {
+  if (process.platform === "win32") {
+    return { executable: process.env.ComSpec ?? "cmd.exe", arguments: ["/d", "/s", "/c", validationCommand] };
+  }
+  return { executable: "/bin/sh", arguments: ["-lc", validationCommand] };
+}
+
 function assertRequestDoesNotContainCredential(
   task: string,
   validationCommands: readonly string[],
@@ -224,9 +253,11 @@ async function executeCandidate(request: CandidateExecutionRequest): Promise<Can
       ?? process.env.DSH_HOME
       ?? join(homedir(), ".dsh");
     const candidateEnvironment = sanitizedEnvironment(process.env, {
-      [request.config.credentialRef]: request.credentialValue,
       DSH_HOME: dshHomeDirectory,
       DSH_PERMISSION_MODE: "workspace-write",
+      ...(request.credentialValue.length > 0
+        ? { [request.config.credentialRef]: request.credentialValue }
+        : {}),
     });
     const taskPrompt = [
       request.task,
@@ -287,7 +318,11 @@ async function executeCandidate(request: CandidateExecutionRequest): Promise<Can
       } else if (processResult.residualProcessGroupDetected) {
         failure = "candidate left a residual process group; the plugin force-terminated it";
       } else {
-        failure = redactedStandardError.trim() || `candidate exited with code ${processResult.exitCode}`;
+        const headlessFailure = extractHeadlessFailureDiagnostic(redactedStandardError);
+        failure = headlessFailure
+          ?? (redactedStandardError.trim().length === 0
+            ? `candidate exited with code ${processResult.exitCode}`
+            : redactedStandardError.trim());
       }
       return {
         candidateId: request.candidateId,
@@ -321,9 +356,10 @@ async function executeCandidate(request: CandidateExecutionRequest): Promise<Can
     let validationFailure: string | null = null;
     const validationEnvironment = sanitizedEnvironment(process.env);
     for (const [commandIndex, validationCommand] of request.validationCommands.entries()) {
+      const validationShell = validationShellInvocation(validationCommand);
       const validationResult = await runProcess({
-        executable: "/bin/sh",
-        arguments: ["-lc", validationCommand],
+        executable: validationShell.executable,
+        arguments: validationShell.arguments,
         cwd: request.worktreePath,
         env: validationEnvironment,
         timeoutMs: request.config.validationTimeoutMs,
@@ -595,11 +631,12 @@ export async function runVerifiedBestOf(
     createApprovalReason(repository, candidateCount, validationCommands, config),
     approvalSignal,
   );
+  // Optional until LLM ranking needs it: validation-only selection completes
+  // without any verifier credential.
   const credentialValue = await dependencies.resolveCredential();
-  if (credentialValue.length === 0) {
-    throw new Error(`credential ${config.credentialRef} resolved to an empty value`);
+  if (credentialValue.length > 0) {
+    assertRequestDoesNotContainCredential(task, validationCommands, credentialValue);
   }
-  assertRequestDoesNotContainCredential(task, validationCommands, credentialValue);
 
   const runAbortController = new AbortController();
   const relayAbort = (): void => runAbortController.abort(input.signal?.reason);
@@ -682,9 +719,24 @@ export async function runVerifiedBestOf(
       winner.rankingPosition = 1;
     }
   } else if (selectionFailure === null && eligibleCandidates.length >= 2) {
-    verifierLogPath = join(runDirectory, "verifier.log");
-    let verifierResponseForLog: VerifierResponse | undefined;
-    try {
+    if (credentialValue.length === 0) {
+      // No verifier credential: auto-select first eligible as provisional
+      // winner; parent agent reviews ranking and can override via
+      // apply_verified_winner with a candidateId parameter.
+      status = "winner_selected";
+      selectionMethod = "parent_agent_review";
+      winner = eligibleCandidates[0];
+      if (winner !== undefined) {
+        winner.score = 1;
+        winner.rankingPosition = 1;
+      }
+      for (const [index, candidate] of eligibleCandidates.entries()) {
+        candidate.rankingPosition = index + 1;
+      }
+    } else {
+      verifierLogPath = join(runDirectory, "verifier.log");
+      let verifierResponseForLog: VerifierResponse | undefined;
+      try {
       const verifierResponse = await dependencies.runVerifier({
         task,
         candidates: eligibleCandidates.map((candidate) => ({
@@ -738,6 +790,7 @@ export async function runVerifiedBestOf(
           response: verifierResponseForLog,
         }, null, 2)}\n`, credentialValue),
       );
+    }
     }
   } else if (selectionFailure !== null) {
     status = "failed";
@@ -933,6 +986,23 @@ export async function applyVerifiedWinner(
     throw new Error(`run manifest must be a regular file, got ${manifestPath}`);
   }
   const manifest = parseStoredRunManifest(await readFile(manifestPath, "utf8"));
+  const manifestRaw = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  let effectiveChangedFiles = manifest.changedFiles;
+  let effectiveWinnerPatchSha256 = manifest.winnerPatchSha256;
+  let effectiveWinnerId = manifest.winnerId;
+  if (input.candidateId) {
+    const candidateRuns = (manifestRaw.candidateRuns ?? []) as Array<Record<string, unknown>>;
+    const target = candidateRuns.find((cr) => cr.candidateId === input.candidateId);
+    if (!target) throw new Error(`candidate ${input.candidateId} not found in run ${input.runId}`);
+    const patchPath = target.patchPath as string;
+    if (!patchPath) throw new Error(`candidate ${input.candidateId} has no patch in manifest`);
+    const patchContent = await readFile(patchPath);
+    const sha256 = createHash("sha256").update(patchContent).digest("hex");
+    await writeFile(join(runDirectory, "winner.patch"), patchContent);
+    effectiveWinnerPatchSha256 = sha256;
+    effectiveWinnerId = input.candidateId;
+    effectiveChangedFiles = target.changedFiles as string[];
+  }
   if (await realpath(manifest.repositoryPath) !== repository.repositoryPath) {
     throw new Error(
       `run ${input.runId} belongs to ${manifest.repositoryPath}, not ${repository.repositoryPath}`,
@@ -956,7 +1026,7 @@ export async function applyVerifiedWinner(
   const canonicalPatchPath = await realpath(expectedPatchPath);
   const patch = await readFile(canonicalPatchPath);
   const actualPatchSha256 = createHash("sha256").update(patch).digest("hex");
-  if (actualPatchSha256 !== manifest.winnerPatchSha256) {
+  if (!input.candidateId && actualPatchSha256 !== manifest.winnerPatchSha256) {
     throw new Error(
       `winner patch hash changed for run ${input.runId}: expected ${manifest.winnerPatchSha256}, got ${actualPatchSha256}`,
     );
@@ -981,9 +1051,6 @@ export async function applyVerifiedWinner(
     approvalSignal,
   );
   const credentialValue = await dependencies.resolveCredential();
-  if (credentialValue.length === 0) {
-    throw new Error(`credential ${config.credentialRef} resolved to an empty value`);
-  }
 
   const repositoryAfterApproval = await inspectRepository(repository.repositoryPath);
   if (repositoryAfterApproval.baseCommit !== manifest.baseCommit) {
@@ -1011,9 +1078,10 @@ export async function applyVerifiedWinner(
   let validationFailure: string | null = null;
   const validationEnvironment = sanitizedEnvironment(process.env);
   for (const [commandIndex, validationCommand] of manifest.validationCommands.entries()) {
+    const validationShell = validationShellInvocation(validationCommand);
     const validationResult = await runProcess({
-      executable: "/bin/sh",
-      arguments: ["-lc", validationCommand],
+      executable: validationShell.executable,
+      arguments: validationShell.arguments,
       cwd: repository.repositoryPath,
       env: validationEnvironment,
       timeoutMs: config.validationTimeoutMs,
@@ -1058,7 +1126,7 @@ export async function applyVerifiedWinner(
     runId: input.runId,
     status: validationStatus === "passed" ? "applied" : "applied_validation_failed",
     patchSha256: actualPatchSha256,
-    changedFiles: manifest.changedFiles,
+    changedFiles: effectiveChangedFiles,
     validationStatus,
     validationLogPaths,
     failure: validationFailure,

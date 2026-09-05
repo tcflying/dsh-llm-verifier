@@ -147,7 +147,7 @@ const verifiedBestOfOutputSchema = {
     },
     selectionMethod: {
       oneOf: [
-        { type: "string", enum: ["llm_verifier", "validation_only"] },
+        { type: "string", enum: ["llm_verifier", "validation_only", "parent_agent_review"] },
         { type: "null" },
       ],
       required: true,
@@ -282,15 +282,18 @@ export function apply(ctx: Context, config: Config = {}): void {
           },
           resolveCredential: async () => {
             const resolvedCredential = await ctx.credentials.resolve(credentialRef(runtimeConfig.credentialRef));
-            if (resolvedCredential === undefined) {
-              throw new Error(`credential ${runtimeConfig.credentialRef} is not configured`);
+            // Absence is not fatal here: validation-only runs complete without
+            // a verifier credential. runVerifiedBestOf enforces the requirement
+            // only when LLM ranking is actually needed.
+            const value = resolvedCredential?.value ?? "";
+            if (value.length > 0) {
+              operationCredential = value;
             }
-            operationCredential = resolvedCredential.value;
-            return resolvedCredential.value;
+            return value;
           },
           runVerifier: async (request) => {
-            if (operationCredential === undefined) {
-              throw new Error("verifier credential was not resolved for this operation");
+            if (operationCredential === undefined || operationCredential.length === 0) {
+              throw new Error(`credential ${runtimeConfig.credentialRef} is not configured`);
             }
             return runPythonVerifier(request, {
               config: runtimeConfig,
@@ -310,6 +313,10 @@ export function apply(ctx: Context, config: Config = {}): void {
         type: "string",
         required: true,
         description: "The runId returned by verified_best_of.",
+      },
+      candidateId: {
+        type: "string",
+        description: "Override: apply this specific candidate instead of the auto-selected winner. Use when selectionMethod is parent_agent_review.",
       },
     },
     output: {
@@ -332,7 +339,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         throw new Error("apply_verified_winner requires a calling agent with a session cwd");
       }
       return applyVerifiedWinner(
-        { runId: args.runId, repositoryPath, signal: exec.signal },
+        { runId: args.runId, repositoryPath, signal: exec.signal, ...(args.candidateId !== undefined ? { candidateId: args.candidateId } : {}) },
         runtimeConfig,
         {
           requestApproval: async (reason, signal) => {
@@ -352,10 +359,9 @@ export function apply(ctx: Context, config: Config = {}): void {
             const resolvedCredential = await ctx.credentials.resolve(
               credentialRef(runtimeConfig.credentialRef),
             );
-            if (resolvedCredential === undefined) {
-              throw new Error(`credential ${runtimeConfig.credentialRef} is not configured`);
-            }
-            return resolvedCredential.value;
+            // Only used for log redaction; an unconfigured credential means
+            // there is nothing to redact.
+            return resolvedCredential?.value ?? "";
           },
         },
       );

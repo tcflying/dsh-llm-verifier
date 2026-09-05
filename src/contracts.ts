@@ -55,7 +55,7 @@ export interface VerifiedBestOfResult {
   readonly completedCandidateCount: number;
   readonly eligibleCandidateCount: number;
   readonly status: "failed" | "no_winner" | "winner_selected";
-  readonly selectionMethod: "llm_verifier" | "validation_only" | null;
+  readonly selectionMethod: "llm_verifier" | "validation_only" | "parent_agent_review" | null;
   readonly winnerId: string | null;
   readonly ranking: PublicCandidateResult[];
   readonly tokenUsage: JsonValue | null;
