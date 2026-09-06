@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import type { CandidateCount, RuntimeConfig } from "./config.ts";
 import { applyVerifiedWinner, rollbackVerifiedWinner, runVerifiedBestOf } from "./core.ts";
+import { registerVerifierSettings, settingsBaseFrom } from "./settings.ts";
 import { runPythonVerifier } from "./verifier.ts";
 
 export const name = "llm-verifier";
@@ -226,6 +227,7 @@ export function skipsInteractiveApproval(
 
 export function apply(ctx: Context, config: Config = {}): void {
   const { defaultCandidateCount, runtimeConfig } = resolvePluginConfig(config);
+  registerVerifierSettings(ctx, settingsBaseFrom(defaultCandidateCount, runtimeConfig));
 
   ctx.tools.register(defineTool({
     name: "verified_best_of",

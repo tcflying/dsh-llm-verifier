@@ -9,7 +9,8 @@
     "lib",
     "python",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "client"
   ],
   "exports": {
     ".": {
@@ -17,7 +18,8 @@
       "default": "./lib/index.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./client": "./client/client.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -34,6 +36,10 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
     }
   },
   "peerDependencies": {
