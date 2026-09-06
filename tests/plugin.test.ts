@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { apply } from "../src/index.ts";
+import { apply, skipsInteractiveApproval } from "../src/index.ts";
 
 describe("Cordis plugin", () => {
   it("registers the three public tools", () => {
@@ -32,5 +32,14 @@ describe("Cordis plugin", () => {
       () => apply(context as never, { verifierModel: "gpt-5" }),
       /invalid verifierModel.*gpt-5/,
     );
+  });
+
+  it("skips the interactive ask only under the unattended 'never' policy", () => {
+    assert.equal(skipsInteractiveApproval("never", undefined), true);
+    assert.equal(skipsInteractiveApproval(undefined, "never"), true);
+    assert.equal(skipsInteractiveApproval("never", "ask"), true);
+    assert.equal(skipsInteractiveApproval("ask", "never"), false);
+    assert.equal(skipsInteractiveApproval(undefined, undefined), false);
+    assert.equal(skipsInteractiveApproval("ask", undefined), false);
   });
 });
