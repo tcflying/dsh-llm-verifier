@@ -1292,9 +1292,14 @@ export async function applyVerifiedWinner(
     );
   }
   const expectedPatchPath = join(runDirectory, "winner.patch");
-  if (resolve(manifest.winnerPatchPath) !== expectedPatchPath) {
+  // review_pending runs resolve the winner patch from the selected candidate's
+  // artifacts; the override block above has already materialized winner.patch.
+  const effectiveWinnerPatchPath = resultStatus === "review_pending"
+    ? expectedPatchPath
+    : manifest.winnerPatchPath;
+  if (resolve(effectiveWinnerPatchPath) !== expectedPatchPath) {
     throw new Error(
-      `run manifest winnerPatchPath escaped its run directory: ${manifest.winnerPatchPath}`,
+      `run manifest winnerPatchPath escaped its run directory: ${effectiveWinnerPatchPath}`,
     );
   }
   const patchMetadata = await lstat(expectedPatchPath);

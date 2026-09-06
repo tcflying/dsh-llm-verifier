@@ -61,9 +61,7 @@ export type RunSettings = VerifierSettings & {
 
 /** Scope registered for this namespace on hosts that provide settings; null on headless. */
 let registeredScope: { get(): unknown } | null = null;
-let registeredProvider: {
-  describe(): { namespaces: Array<{ ns: string; revision: number }> };
-} | null = null;
+let registeredProvider: { describe(): unknown } | null = null;
 
 export function registeredVerifierScope(): unknown {
   return registeredScope;
@@ -84,9 +82,12 @@ export function resolveRunSettings(fallback: RunSettings): {
   const section = registeredScope.get() as RunSettings;
   let settingsRevision: number | null = null;
   if (registeredProvider !== null) {
-    const descriptor = registeredProvider
-      .describe()
-      .namespaces.find((namespace) => namespace.ns === SETTINGS_NAMESPACE);
+    // The host provider's describe() returns a bare descriptor array.
+    const described: unknown = registeredProvider.describe();
+    const list = Array.isArray(described)
+      ? (described as Array<{ ns: string; revision: number }>)
+      : ((described as { namespaces?: Array<{ ns: string; revision: number }> }).namespaces ?? []);
+    const descriptor = list.find((namespace) => namespace.ns === SETTINGS_NAMESPACE);
     settingsRevision = descriptor?.revision ?? null;
   }
   return { section, settingsRevision };
@@ -214,7 +215,7 @@ export function registerVerifierSettings(ctx: Context, base: VerifierSettings): 
       callback: (
         scoped: Context & {
           settings: SettingsProviderLike & {
-            describe(): { namespaces: Array<{ ns: string; revision: number }> };
+            describe(): unknown;
           };
         },
       ) => void,
