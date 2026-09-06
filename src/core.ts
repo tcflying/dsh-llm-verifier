@@ -4,7 +4,7 @@ import { access, copyFile, lstat, mkdir, readFile, realpath, rm, statfs, writeFi
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
-import type { CandidateCount, RuntimeConfig } from "./config.ts";
+import type { CandidateCount } from "./config.ts";
 import { normalizeCandidateCount } from "./config.ts";
 import type {
   CandidateResult,
@@ -12,7 +12,9 @@ import type {
   ApplyVerifiedWinnerResult,
   ApplyRuntimeDependencies,
   PublicCandidateResult,
+  ReviewReceipt,
   RuntimeDependencies,
+  SelectVerifiedCandidateResult,
   VerifiedBestOfResult,
   VerifierResponse,
 } from "./contracts.ts";
@@ -25,6 +27,7 @@ import {
   type RepositorySnapshot,
 } from "./git.ts";
 import { redactSecret, runProcess, sanitizedEnvironment } from "./process.ts";
+import type { RunSettings } from "./settings.ts";
 import { resolveValidationCommands } from "./validation.ts";
 
 function progress(message: string): void {
@@ -42,6 +45,8 @@ export interface RunVerifiedBestOfInput {
   readonly candidateCount?: number;
   readonly validationCommands?: readonly string[];
   readonly repositoryPath: string;
+  /** Settings-document revision at snapshot time, recorded in the run manifest. */
+  readonly settingsRevision?: number | null;
   readonly signal?: AbortSignal;
 }
 
@@ -69,7 +74,7 @@ interface CandidateExecutionRequest {
   readonly task: string;
   readonly validationCommands: readonly string[];
   readonly repository: RepositorySnapshot;
-  readonly config: RuntimeConfig;
+  readonly config: RunSettings;
   readonly credentialValue: string;
   readonly signal: AbortSignal;
 }
@@ -135,7 +140,7 @@ function createApprovalReason(
   repository: RepositorySnapshot,
   candidateCount: CandidateCount,
   validationCommands: readonly string[],
-  config: RuntimeConfig,
+  config: RunSettings,
 ): string {
   const estimatedVerifierRequests = (candidateCount === 3 ? 18 : 36) * config.nEvaluations;
   return [
@@ -547,7 +552,7 @@ function reportMarkdown(
   result: VerifiedBestOfResult,
   candidateResults: readonly CandidateResult[],
   cleanupWarnings: readonly string[],
-  config: RuntimeConfig,
+  config: RunSettings,
   verifierLogPath: string | null,
 ): string {
   const tableCell = (value: string): string => value
@@ -619,13 +624,39 @@ function reportMarkdown(
   ].join("\n");
 }
 
+/**
+ * Run every worktree through `worker` with at most `limit` concurrent
+ * executions, preserving one result per worktree in input order. Queued
+ * candidates are skipped (marked cancelled) once `signal` aborts.
+ */
+async function runCandidatePool(
+  worktreePaths: string[],
+  limit: number,
+  worker: (worktreePath: string, candidateIndex: number) => Promise<CandidateResult>,
+): Promise<CandidateResult[]> {
+  const concurrency = Math.max(1, Math.min(limit, worktreePaths.length));
+  const results: CandidateResult[] = new Array(worktreePaths.length);
+  let nextIndex = 0;
+  const runners = Array.from({ length: concurrency }, async () => {
+    while (nextIndex < worktreePaths.length) {
+      const candidateIndex = nextIndex;
+      nextIndex += 1;
+      const worktreePath = worktreePaths[candidateIndex];
+      if (worktreePath === undefined) continue;
+      results[candidateIndex] = await worker(worktreePath, candidateIndex);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 export async function runVerifiedBestOf(
   input: RunVerifiedBestOfInput,
-  config: RuntimeConfig,
+  config: RunSettings,
   dependencies: RuntimeDependencies,
 ): Promise<VerifiedBestOfResult> {
   const task = validateTask(input.task);
-  const candidateCount = normalizeCandidateCount(input.candidateCount, 3);
+  const candidateCount: CandidateCount = normalizeCandidateCount(input.candidateCount, config.defaultCandidateCount);
   if (!CREDENTIAL_REFERENCE.test(config.credentialRef)) {
     throw new Error(
       `invalid credentialRef: expected a POSIX environment name, got ${JSON.stringify(config.credentialRef)}`,
@@ -679,8 +710,8 @@ export async function runVerifiedBestOf(
       await createDetachedWorktree(repository, worktreePath, runAbortController.signal);
       worktreePaths.push(worktreePath);
     }
-    progress(`launching ${candidateCount} candidates in parallel`);
-    candidateResults = await Promise.all(worktreePaths.map((worktreePath, candidateIndex) => {
+    progress(`launching ${candidateCount} candidates (max ${config.maxConcurrentCandidates} concurrent)`);
+    candidateResults = await runCandidatePool(worktreePaths, config.maxConcurrentCandidates, (worktreePath, candidateIndex) => {
       const candidateId = `candidate-${candidateIndex + 1}`;
       progress(`candidate ${candidateId} started`);
       return executeCandidate({
@@ -694,7 +725,7 @@ export async function runVerifiedBestOf(
         credentialValue,
         signal: runAbortController.signal,
       });
-    }));
+    });
   } finally {
     for (const worktreePath of [...worktreePaths].reverse()) {
       try {
@@ -726,11 +757,19 @@ export async function runVerifiedBestOf(
   let tokenUsage: VerifiedBestOfResult["tokenUsage"] = null;
   let verifierRequestCount = 0;
   let verifierLogPath: string | null = null;
+  let reviewReceipt: ReviewReceipt | null = null;
   let selectionFailure: string | null = runAbortController.signal.aborted
     ? "run was cancelled or exceeded its total timeout"
     : null;
 
-  if (selectionFailure === null && eligibleCandidates.length === 1) {
+  const enterReviewPending = (reason: string): void => {
+    status = "review_pending";
+    selectionMethod = null;
+    winner = undefined;
+    progress(`run ${runId}: review_pending — ${reason}`);
+  };
+
+  if (selectionFailure === null && eligibleCandidates.length === 1 && !config.reviewSingleEligible) {
     status = "winner_selected";
     selectionMethod = "validation_only";
     winner = eligibleCandidates[0];
@@ -738,79 +777,173 @@ export async function runVerifiedBestOf(
       winner.score = 1;
       winner.rankingPosition = 1;
     }
-  } else if (selectionFailure === null && eligibleCandidates.length >= 2) {
-    if (credentialValue.length === 0) {
-      // No verifier credential: auto-select first eligible as provisional
-      // winner; parent agent reviews ranking and can override via
-      // apply_verified_winner with a candidateId parameter.
-      status = "winner_selected";
-      selectionMethod = "parent_agent_review";
-      winner = eligibleCandidates[0];
-      if (winner !== undefined) {
-        winner.score = 1;
-        winner.rankingPosition = 1;
-      }
+  } else if (selectionFailure === null && eligibleCandidates.length >= 1) {
+    if (config.reviewMode === "parent_agent") {
+      // Parent-agent mode never auto-selects: the run stays review_pending
+      // until an explicit select_verified_candidate call records the choice.
+      enterReviewPending("parent agent must pick a winner via select_verified_candidate");
       for (const [index, candidate] of eligibleCandidates.entries()) {
         candidate.rankingPosition = index + 1;
       }
-    } else {
-      verifierLogPath = join(runDirectory, "verifier.log");
-      let verifierResponseForLog: VerifierResponse | undefined;
-      try {
-      const verifierResponse = await dependencies.runVerifier({
-        task,
-        candidates: eligibleCandidates.map((candidate) => ({
-          candidateId: candidate.candidateId,
-          trajectory: candidate.verifierTrace,
-        })),
-        pivots: Math.min(2, eligibleCandidates.length - 1),
-        model: config.verifierModel,
-        nEvaluations: config.nEvaluations,
-        maxWorkers: config.maxVerifierWorkers,
-        cachePath: join(runDirectory, "verifier-cache.json"),
-        signal: runAbortController.signal,
-      });
-      verifierResponseForLog = verifierResponse;
-      await writePrivateTextFile(
-        verifierLogPath,
-        redactSecret(`${JSON.stringify({
-          candidateIds: eligibleCandidates.map((candidate) => candidate.candidateId),
-          pivots: Math.min(2, eligibleCandidates.length - 1),
-          model: config.verifierModel,
-          nEvaluations: config.nEvaluations,
-          maxWorkers: config.maxVerifierWorkers,
-          response: verifierResponse,
-        }, null, 2)}\n`, credentialValue),
-      );
-      validateVerifierResponse(verifierResponse, eligibleCandidates.length);
-      for (const [candidateIndex, candidate] of eligibleCandidates.entries()) {
-        candidate.score = verifierResponse.scores[candidateIndex] ?? null;
-      }
-      for (const [rankingIndex, candidateIndex] of verifierResponse.ranking.entries()) {
-        const rankedCandidate = eligibleCandidates[candidateIndex];
-        if (rankedCandidate !== undefined) {
-          rankedCandidate.rankingPosition = rankingIndex + 1;
+    } else if (config.reviewMode === "dsh_model") {
+      if (dependencies.reviewCandidates === undefined) {
+        if (config.reviewFailurePolicy === "parent_agent") {
+          enterReviewPending("no host LLM runtime is available for reviewMode 'dsh_model'");
+        } else {
+          status = "failed";
+          selectionFailure = "reviewMode 'dsh_model' requires the host LLM runtime (ctx.llm), which is unavailable";
+        }
+      } else {
+        try {
+          const diffTexts: string[] = [];
+          for (const candidate of eligibleCandidates) {
+            if (candidate.patchPath === null) {
+              diffTexts.push("");
+              continue;
+            }
+            try {
+              diffTexts.push(await readFile(candidate.patchPath, "utf8"));
+            } catch {
+              diffTexts.push("");
+            }
+          }
+          const receipt = await dependencies.reviewCandidates({
+            provider: config.reviewerProvider,
+            model: config.reviewerModel,
+            ...(config.reviewerReasoningEffort !== "" ? { reasoningEffort: config.reviewerReasoningEffort } : {}),
+            maxTokens: config.reviewerMaxTokens,
+            timeoutMs: config.reviewerTimeoutMs,
+            signal: runAbortController.signal,
+            task,
+            candidates: eligibleCandidates.map((candidate, index) => ({
+              candidateId: candidate.candidateId,
+              validationStatus: candidate.validationStatus,
+              diffStat: candidate.diffStat,
+              changedFiles: candidate.changedFiles,
+              diffText: diffTexts[index] ?? "",
+            })),
+          });
+          reviewReceipt = receipt;
+          status = "winner_selected";
+          selectionMethod = "dsh_model";
+          winner = eligibleCandidates.find((candidate) => candidate.candidateId === receipt.selectedId);
+          for (const candidate of eligibleCandidates) {
+            candidate.score = receipt.scores[candidate.candidateId] ?? null;
+          }
+          const ranked = [...eligibleCandidates].sort((left, right) => {
+            const byScore = (right.score ?? 0) - (left.score ?? 0);
+            return byScore !== 0 ? byScore : left.candidateId.localeCompare(right.candidateId);
+          });
+          for (const [index, candidate] of ranked.entries()) {
+            candidate.rankingPosition = index + 1;
+          }
+          progress(`dsh_model review selected ${receipt.selectedId} in ${receipt.durationMs}ms`);
+        } catch (error) {
+          const failure = failureMessage(error, credentialValue);
+          if (config.reviewFailurePolicy === "parent_agent") {
+            enterReviewPending(`dsh_model review failed (${failure}); policy hands off to the parent agent`);
+          } else {
+            status = "failed";
+            selectionFailure = failure;
+          }
         }
       }
-      winner = eligibleCandidates[verifierResponse.winnerIndex];
-      status = "winner_selected";
-      selectionMethod = "llm_verifier";
-      tokenUsage = verifierResponse.tokenUsage;
-      verifierRequestCount = verifierResponse.requestCount;
-    } catch (error) {
-      status = "failed";
-      selectionFailure = failureMessage(error, credentialValue);
-      await writePrivateTextFile(
-        verifierLogPath,
-        redactSecret(`${JSON.stringify({
-          candidateIds: eligibleCandidates.map((candidate) => candidate.candidateId),
-          pivots: Math.min(2, eligibleCandidates.length - 1),
-          model: config.verifierModel,
-          failure: selectionFailure,
-          response: verifierResponseForLog,
-        }, null, 2)}\n`, credentialValue),
-      );
-    }
+    } else if (config.reviewMode === "deepseek_verifier") {
+      if (eligibleCandidates.length === 1) {
+        // The comparison bridge accepts 2-5 inputs; a single candidate cannot
+        // be compared without fabricating inputs, so it goes to review unless
+        // the operator accepted validation-only for single candidates.
+        if (config.reviewSingleEligible) {
+          enterReviewPending("single eligible candidate cannot enter the comparison bridge; parent review required");
+        } else {
+          status = "winner_selected";
+          selectionMethod = "validation_only";
+          winner = eligibleCandidates[0];
+          if (winner !== undefined) {
+            winner.score = 1;
+            winner.rankingPosition = 1;
+          }
+        }
+      } else if (credentialValue.length === 0) {
+        if (config.reviewFailurePolicy === "parent_agent") {
+          enterReviewPending(`credential ${config.credentialRef} is not configured; policy hands off to the parent agent`);
+        } else {
+          status = "failed";
+          selectionFailure = `reviewMode 'deepseek_verifier' requires credential ${config.credentialRef}, which is not configured`;
+        }
+      } else {
+        verifierLogPath = join(runDirectory, "verifier.log");
+        let verifierResponseForLog: VerifierResponse | undefined;
+        try {
+          const verifierResponse = await dependencies.runVerifier({
+            task,
+            candidates: eligibleCandidates.map((candidate) => ({
+              candidateId: candidate.candidateId,
+              trajectory: candidate.verifierTrace,
+            })),
+            pivots: Math.min(2, eligibleCandidates.length - 1),
+            model: config.verifierModel,
+            nEvaluations: config.nEvaluations,
+            maxWorkers: config.maxVerifierWorkers,
+            cachePath: join(runDirectory, "verifier-cache.json"),
+            signal: runAbortController.signal,
+          });
+          verifierResponseForLog = verifierResponse;
+          await writePrivateTextFile(
+            verifierLogPath,
+            redactSecret(`${JSON.stringify({
+              candidateIds: eligibleCandidates.map((candidate) => candidate.candidateId),
+              pivots: Math.min(2, eligibleCandidates.length - 1),
+              model: config.verifierModel,
+              nEvaluations: config.nEvaluations,
+              maxWorkers: config.maxVerifierWorkers,
+              response: verifierResponse,
+            }, null, 2)}\n`, credentialValue),
+          );
+          validateVerifierResponse(verifierResponse, eligibleCandidates.length);
+          for (const [candidateIndex, candidate] of eligibleCandidates.entries()) {
+            candidate.score = verifierResponse.scores[candidateIndex] ?? null;
+          }
+          for (const [rankingIndex, candidateIndex] of verifierResponse.ranking.entries()) {
+            const rankedCandidate = eligibleCandidates[candidateIndex];
+            if (rankedCandidate !== undefined) {
+              rankedCandidate.rankingPosition = rankingIndex + 1;
+            }
+          }
+          winner = eligibleCandidates[verifierResponse.winnerIndex];
+          status = "winner_selected";
+          selectionMethod = "llm_verifier";
+          tokenUsage = verifierResponse.tokenUsage;
+          verifierRequestCount = verifierResponse.requestCount;
+        } catch (error) {
+          if (config.reviewFailurePolicy === "parent_agent") {
+            enterReviewPending("deepseek_verifier review failed; policy hands off to the parent agent");
+            await writePrivateTextFile(
+              verifierLogPath,
+              redactSecret(`${JSON.stringify({
+                candidateIds: eligibleCandidates.map((candidate) => candidate.candidateId),
+                failure: failureMessage(error, credentialValue),
+                response: verifierResponseForLog,
+              }, null, 2)}\n`, credentialValue),
+            ).catch(() => {});
+          } else {
+            status = "failed";
+            selectionFailure = failureMessage(error, credentialValue);
+            await writePrivateTextFile(
+              verifierLogPath,
+              redactSecret(`${JSON.stringify({
+                candidateIds: eligibleCandidates.map((candidate) => candidate.candidateId),
+                pivots: Math.min(2, eligibleCandidates.length - 1),
+                model: config.verifierModel,
+                nEvaluations: config.nEvaluations,
+                maxWorkers: config.maxVerifierWorkers,
+                failure: selectionFailure,
+                response: verifierResponseForLog,
+              }, null, 2)}\n`, credentialValue),
+            );
+          }
+        }
+      }
     }
   } else if (selectionFailure !== null) {
     status = "failed";
@@ -833,8 +966,35 @@ export async function runVerifiedBestOf(
 
   progress(`run ${runId} complete: status=${status}, winner=${winner?.candidateId ?? "none"}`);
   const reportPath = join(runDirectory, "report.md");
+  const resolvedConfig: Record<string, string | number | boolean | string[]> = {
+    enabled: config.enabled,
+    defaultCandidateCount: config.defaultCandidateCount,
+    maxConcurrentCandidates: config.maxConcurrentCandidates,
+    candidateProfile: config.candidateProfile,
+    reviewMode: config.reviewMode,
+    reviewerProvider: config.reviewerProvider,
+    reviewerModel: config.reviewerModel,
+    reviewerReasoningEffort: config.reviewerReasoningEffort,
+    reviewerMaxTokens: config.reviewerMaxTokens,
+    reviewerTimeoutMs: config.reviewerTimeoutMs,
+    reviewSingleEligible: config.reviewSingleEligible,
+    reviewFailurePolicy: config.reviewFailurePolicy,
+    validationMode: config.validationMode,
+    validationCommands: [...validationCommands],
+    credentialRef: config.credentialRef,
+    verifierModel: config.verifierModel,
+    nEvaluations: config.nEvaluations,
+    maxVerifierWorkers: config.maxVerifierWorkers,
+    verifierEffort: config.verifierEffort,
+    verifierMaxTokens: config.verifierMaxTokens,
+    candidateTimeoutMs: config.candidateTimeoutMs,
+    validationTimeoutMs: config.validationTimeoutMs,
+    runTimeoutMs: config.runTimeoutMs,
+    maxVerifierTraceBytes: config.maxVerifierTraceBytes,
+    stateDirectory: config.stateDirectory,
+  };
   const result: VerifiedBestOfResult = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId,
     baseCommit: repository.baseCommit,
     requestedCandidateCount: candidateCount,
@@ -859,12 +1019,15 @@ export async function runVerifiedBestOf(
     reportPath,
     winnerPatchPath,
     failure: selectionFailure,
+    review: reviewReceipt,
+    resolvedConfig,
+    settingsRevision: input.settingsRevision ?? null,
   };
   const manifestPath = join(runDirectory, "manifest.json");
   await writePrivateTextFile(
     manifestPath,
     `${JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       pluginVersion: PLUGIN_VERSION,
       createdAt: new Date().toISOString(),
       repositoryPath: repository.repositoryPath,
@@ -872,6 +1035,8 @@ export async function runVerifiedBestOf(
       validationCommands,
       winnerPatchSha256,
       verifierLogPath,
+      resolvedConfig,
+      settingsRevision: input.settingsRevision ?? null,
       candidateRuns: candidateResults.map((candidate) => ({
         candidateId: candidate.candidateId,
         executionStatus: candidate.executionStatus,
@@ -921,7 +1086,7 @@ function requiredManifestString(
   return value;
 }
 
-function parseStoredRunManifest(manifestText: string): StoredRunManifest {
+function parseStoredRunManifest(manifestText: string, selectionText?: string): StoredRunManifest {
   let manifestValue: unknown;
   try {
     manifestValue = JSON.parse(manifestText);
@@ -932,7 +1097,7 @@ function parseStoredRunManifest(manifestText: string): StoredRunManifest {
     throw new Error(`invalid run manifest root: ${JSON.stringify(manifestValue)}`);
   }
   const manifest = manifestValue as Record<string, unknown>;
-  if (manifest.schemaVersion !== 1) {
+  if (manifest.schemaVersion !== 1 && manifest.schemaVersion !== 2) {
     throw new Error(`unsupported run manifest schemaVersion: ${JSON.stringify(manifest.schemaVersion)}`);
   }
   const resultValue = manifest.result;
@@ -940,8 +1105,9 @@ function parseStoredRunManifest(manifestText: string): StoredRunManifest {
     throw new Error(`invalid run manifest result: ${JSON.stringify(resultValue)}`);
   }
   const result = resultValue as Record<string, unknown>;
-  if (result.status !== "winner_selected") {
-    throw new Error(`run ${JSON.stringify(result.runId)} has no applicable winner; status is ${JSON.stringify(result.status)}`);
+  const status = result.status;
+  if (status !== "winner_selected" && status !== "review_pending") {
+    throw new Error(`run ${JSON.stringify(result.runId)} has no applicable winner; status is ${JSON.stringify(status)}`);
   }
   const validationCommands = manifest.validationCommands;
   if (
@@ -951,42 +1117,99 @@ function parseStoredRunManifest(manifestText: string): StoredRunManifest {
   ) {
     throw new Error(`invalid run manifest validationCommands: ${JSON.stringify(validationCommands)}`);
   }
-  const winnerPatchSha256 = requiredManifestString(manifest, "winnerPatchSha256");
-  if (!/^[0-9a-f]{64}$/u.test(winnerPatchSha256)) {
-    throw new Error(`invalid run manifest winnerPatchSha256: ${JSON.stringify(winnerPatchSha256)}`);
-  }
   const rankingValue = result.ranking;
   if (!Array.isArray(rankingValue)) {
     throw new Error(`invalid run manifest ranking: ${JSON.stringify(rankingValue)}`);
   }
-  const winnerId = requiredManifestString(result, "winnerId");
-  const winnerEntry = rankingValue.find((entry) => {
-    return entry !== null
-      && typeof entry === "object"
-      && !Array.isArray(entry)
-      && (entry as Record<string, unknown>).candidateId === winnerId;
-  });
-  if (winnerEntry === undefined) {
-    throw new Error(`run manifest winner ${JSON.stringify(winnerId)} is absent from ranking`);
-  }
-  const changedFilesValue = (winnerEntry as Record<string, unknown>).changedFiles;
-  if (!Array.isArray(changedFilesValue) || changedFilesValue.some((path) => typeof path !== "string")) {
-    throw new Error(`invalid winner changedFiles: ${JSON.stringify(changedFilesValue)}`);
+  const candidateRuns = Array.isArray(manifest.candidateRuns) ? (manifest.candidateRuns as Array<Record<string, unknown>>) : [];
+  let winnerId: string;
+  let winnerPatchSha256: string;
+  let winnerPatchPath: string | null;
+  let changedFiles: string[];
+  if (status === "winner_selected") {
+    winnerId = requiredManifestString(result, "winnerId");
+    winnerPatchSha256 = requiredManifestString(manifest, "winnerPatchSha256");
+    if (!/^[0-9a-f]{64}$/u.test(winnerPatchSha256)) {
+      throw new Error(`invalid run manifest winnerPatchSha256: ${JSON.stringify(winnerPatchSha256)}`);
+    }
+    winnerPatchPath = requiredManifestString(result, "winnerPatchPath");
+    const winnerEntry = rankingValue.find((entry) => {
+      return entry !== null
+        && typeof entry === "object"
+        && !Array.isArray(entry)
+        && (entry as Record<string, unknown>).candidateId === winnerId;
+    });
+    if (winnerEntry === undefined) {
+      throw new Error(`run manifest winner ${JSON.stringify(winnerId)} is absent from ranking`);
+    }
+    const changedFilesValue = (winnerEntry as Record<string, unknown>).changedFiles;
+    if (!Array.isArray(changedFilesValue) || changedFilesValue.some((path) => typeof path !== "string")) {
+      throw new Error(`invalid winner changedFiles: ${JSON.stringify(changedFilesValue)}`);
+    }
+    changedFiles = changedFilesValue as string[];
+  } else {
+    if (selectionText === undefined) {
+      throw new Error(
+        `run ${JSON.stringify(result.runId)} is awaiting an explicit reviewer choice; call select_verified_candidate first`,
+      );
+    }
+    let selectionValue: unknown;
+    try {
+      selectionValue = JSON.parse(selectionText);
+    } catch (error) {
+      throw new Error("selection record contains invalid JSON", { cause: error });
+    }
+    if (selectionValue === null || typeof selectionValue !== "object" || Array.isArray(selectionValue)) {
+      throw new Error("invalid selection record root");
+    }
+    const record = selectionValue as Record<string, unknown>;
+    if (record.status !== "selected") {
+      throw new Error(`invalid selection record status: ${JSON.stringify(record.status)}`);
+    }
+    if (typeof record.candidateId !== "string" || record.candidateId.length === 0) {
+      throw new Error("selection record is missing candidateId");
+    }
+    if (typeof record.reason !== "string" || record.reason.trim().length === 0) {
+      throw new Error("selection record is missing the reviewer reason");
+    }
+    winnerId = record.candidateId;
+    const candidate = candidateRuns.find((entry) => entry.candidateId === winnerId);
+    if (candidate === undefined) {
+      throw new Error(`selected candidate ${JSON.stringify(winnerId)} is absent from the run manifest`);
+    }
+    if (candidate.executionStatus !== "completed" || candidate.validationStatus !== "passed") {
+      throw new Error(
+        `selected candidate ${JSON.stringify(winnerId)} is not eligible (execution ${JSON.stringify(candidate.executionStatus)}, validation ${JSON.stringify(candidate.validationStatus)})`,
+      );
+    }
+    if (typeof candidate.patchPath !== "string" || candidate.patchPath.length === 0) {
+      throw new Error(`selected candidate ${JSON.stringify(winnerId)} has no patch in the manifest`);
+    }
+    if (typeof candidate.patchSha256 !== "string" || !/^[0-9a-f]{64}$/u.test(candidate.patchSha256)) {
+      throw new Error(`selected candidate ${JSON.stringify(winnerId)} has an invalid patch hash`);
+    }
+    const changedFilesValue = candidate.changedFiles;
+    if (!Array.isArray(changedFilesValue) || changedFilesValue.some((path) => typeof path !== "string")) {
+      throw new Error(`invalid selected candidate changedFiles: ${JSON.stringify(changedFilesValue)}`);
+    }
+    winnerPatchSha256 = candidate.patchSha256;
+    winnerPatchPath = candidate.patchPath;
+    changedFiles = changedFilesValue as string[];
   }
   return {
     repositoryPath: requiredManifestString(manifest, "repositoryPath"),
     baseCommit: requiredManifestString(manifest, "baseCommit"),
     validationCommands: validationCommands as string[],
     winnerPatchSha256,
-    winnerPatchPath: requiredManifestString(result, "winnerPatchPath"),
+    winnerPatchPath,
     winnerId,
-    changedFiles: changedFilesValue as string[],
+    changedFiles,
   };
 }
 
 export async function applyVerifiedWinner(
   input: ApplyVerifiedWinnerInput,
-  config: RuntimeConfig,
+  config: RunSettings,
   dependencies: ApplyRuntimeDependencies,
 ): Promise<ApplyVerifiedWinnerResult> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(input.runId)) {
@@ -1006,22 +1229,56 @@ export async function applyVerifiedWinner(
   if (!manifestMetadata.isFile()) {
     throw new Error(`run manifest must be a regular file, got ${manifestPath}`);
   }
-  const manifest = parseStoredRunManifest(await readFile(manifestPath, "utf8"));
-  const manifestRaw = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  const manifestText = await readFile(manifestPath, "utf8");
+  const selectionPath = join(runDirectory, "selection.json");
+  let selectionText: string | undefined;
+  try {
+    selectionText = await readFile(selectionPath, "utf8");
+  } catch {
+    selectionText = undefined;
+  }
+  const manifest = parseStoredRunManifest(manifestText, selectionText);
+  const manifestRaw = JSON.parse(manifestText) as Record<string, unknown>;
+  const resultStatus = (manifestRaw.result as Record<string, unknown>).status;
   let effectiveChangedFiles = manifest.changedFiles;
   let effectiveWinnerPatchSha256 = manifest.winnerPatchSha256;
   let effectiveWinnerId = manifest.winnerId;
-  if (input.candidateId) {
+  let overrideCandidateId = input.candidateId;
+  if (
+    overrideCandidateId !== undefined
+    && selectionText !== undefined
+  ) {
+    const selection = JSON.parse(selectionText) as { candidateId?: unknown };
+    if (selection.candidateId !== overrideCandidateId) {
+      throw new Error(
+        `candidateId ${JSON.stringify(overrideCandidateId)} conflicts with the recorded selection ${JSON.stringify(selection.candidateId)}; call select_verified_candidate again to change the choice`,
+      );
+    }
+  }
+  if (
+    overrideCandidateId !== undefined
+    && manifestRaw.schemaVersion === 2
+    && resultStatus === "winner_selected"
+    && overrideCandidateId !== manifest.winnerId
+  ) {
+    throw new Error(
+      `run ${input.runId} recorded ${manifest.winnerId} as the verified winner; candidateId overrides are only supported on legacy v1 runs`,
+    );
+  }
+  if (resultStatus === "review_pending" && overrideCandidateId === undefined) {
+    overrideCandidateId = manifest.winnerId;
+  }
+  if (overrideCandidateId) {
     const candidateRuns = (manifestRaw.candidateRuns ?? []) as Array<Record<string, unknown>>;
-    const target = candidateRuns.find((cr) => cr.candidateId === input.candidateId);
-    if (!target) throw new Error(`candidate ${input.candidateId} not found in run ${input.runId}`);
+    const target = candidateRuns.find((cr) => cr.candidateId === overrideCandidateId);
+    if (!target) throw new Error(`candidate ${overrideCandidateId} not found in run ${input.runId}`);
     const patchPath = target.patchPath as string;
-    if (!patchPath) throw new Error(`candidate ${input.candidateId} has no patch in manifest`);
+    if (!patchPath) throw new Error(`candidate ${overrideCandidateId} has no patch in manifest`);
     const patchContent = await readFile(patchPath);
     const sha256 = createHash("sha256").update(patchContent).digest("hex");
     await writeFile(join(runDirectory, "winner.patch"), patchContent);
     effectiveWinnerPatchSha256 = sha256;
-    effectiveWinnerId = input.candidateId;
+    effectiveWinnerId = overrideCandidateId;
     effectiveChangedFiles = target.changedFiles as string[];
   }
   if (await realpath(manifest.repositoryPath) !== repository.repositoryPath) {
@@ -1161,7 +1418,7 @@ export async function applyVerifiedWinner(
 
 export async function rollbackVerifiedWinner(
   input: ApplyVerifiedWinnerInput,
-  config: RuntimeConfig,
+  config: RunSettings,
 ): Promise<RollbackResult> {
   const runId = input.runId;
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(runId)) {
@@ -1205,4 +1462,88 @@ export async function rollbackVerifiedWinner(
     JSON.stringify(rollbackResult, null, 2),
   );
   return rollbackResult;
+}
+
+export interface SelectVerifiedCandidateInput {
+  readonly runId: string;
+  readonly repositoryPath: string;
+  readonly candidateId: string;
+  readonly reason: string;
+  /** Filled by the host from the calling agent, never trusted from model output. */
+  readonly sessionId?: string;
+}
+
+/**
+ * Record an explicit parent-agent selection for a run in review_pending.
+ * Writing selection.json is the only way a review_pending run becomes
+ * applicable; the record keeps the reason and the host-filled session id as
+ * the audit trail. Re-selecting overwrites the record until apply.
+ */
+export async function selectVerifiedCandidate(
+  input: SelectVerifiedCandidateInput,
+  config: RunSettings,
+): Promise<SelectVerifiedCandidateResult> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(input.runId)) {
+    throw new Error(`invalid runId: expected a UUID v4, got ${JSON.stringify(input.runId)}`);
+  }
+  if (input.candidateId.trim().length === 0) {
+    throw new Error("candidateId is required");
+  }
+  const reason = input.reason.trim();
+  if (reason.length === 0) {
+    throw new Error("a non-empty reason is required for an explicit selection");
+  }
+  const repository = await inspectRepository(input.repositoryPath);
+  const stateDirectory = await canonicalStateDirectory(config.stateDirectory, repository.repositoryPath);
+  const requestedRunDirectory = join(stateDirectory, "runs", input.runId);
+  const runDirectory = await realpath(requestedRunDirectory);
+  if (!isPathInside(stateDirectory, runDirectory)) {
+    throw new Error(
+      `run directory escaped stateDirectory: ${requestedRunDirectory} resolved to ${runDirectory}`,
+    );
+  }
+  const manifestPath = join(runDirectory, "manifest.json");
+  const manifestRaw = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  if (manifestRaw.schemaVersion !== 2) {
+    throw new Error("select_verified_candidate requires a schemaVersion 2 run manifest");
+  }
+  const result = manifestRaw.result as Record<string, unknown> | undefined;
+  if (result === undefined || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error(`run ${input.runId} manifest has no result record`);
+  }
+  if (result.status !== "review_pending") {
+    throw new Error(
+      `run ${input.runId} is not awaiting a selection; status is ${JSON.stringify(result.status)}`,
+    );
+  }
+  const candidateRuns = (manifestRaw.candidateRuns ?? []) as Array<Record<string, unknown>>;
+  const target = candidateRuns.find((entry) => entry.candidateId === input.candidateId);
+  if (target === undefined) {
+    throw new Error(`candidate ${JSON.stringify(input.candidateId)} is not part of run ${input.runId}`);
+  }
+  if (target.executionStatus !== "completed" || target.validationStatus !== "passed") {
+    throw new Error(
+      `candidate ${JSON.stringify(input.candidateId)} is not eligible (execution ${JSON.stringify(target.executionStatus)}, validation ${JSON.stringify(target.validationStatus)})`,
+    );
+  }
+  const selectedAt = new Date().toISOString();
+  const record = {
+    schemaVersion: 2,
+    runId: input.runId,
+    candidateId: input.candidateId,
+    reason,
+    status: "selected",
+    selectedAt,
+    sessionId: input.sessionId ?? null,
+  };
+  await writeFile(join(runDirectory, "selection.json"), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  return {
+    schemaVersion: 2,
+    runId: input.runId,
+    candidateId: input.candidateId,
+    reason,
+    status: "selected",
+    selectedAt,
+    sessionId: input.sessionId ?? null,
+  };
 }

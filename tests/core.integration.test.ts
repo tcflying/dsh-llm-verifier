@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, it } from "node:test";
 
-import type { RuntimeConfig } from "../src/config.ts";
+import type { RunSettings } from "../src/settings.ts";
 import { applyVerifiedWinner, runVerifiedBestOf } from "../src/core.ts";
 
 const execFileAsync = promisify(execFile);
@@ -77,9 +77,22 @@ async function assertTreeDoesNotContain(rootPath: string, forbiddenText: string)
   }
 }
 
-function createRuntimeConfig(stateDirectory: string, dshExecutable: string): RuntimeConfig {
+function createRuntimeConfig(stateDirectory: string, dshExecutable: string): RunSettings {
   return {
+    enabled: true,
+    defaultCandidateCount: 3,
+    maxConcurrentCandidates: 3,
     candidateProfile: "headless",
+    reviewMode: "deepseek_verifier",
+    reviewerProvider: "",
+    reviewerModel: "",
+    reviewerReasoningEffort: "",
+    reviewerMaxTokens: 4_096,
+    reviewerTimeoutMs: 30_000,
+    reviewSingleEligible: false,
+    reviewFailurePolicy: "stop",
+    validationMode: "auto",
+    validationCommands: [],
     credentialRef: "DEEPSEEK_API_KEY",
     verifierModel: "deepseek-v4-flash",
     nEvaluations: 2,

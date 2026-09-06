@@ -17,7 +17,7 @@ interface SettingsProviderLike {
       applies?: "live" | "restart";
       validate?: (value: T) => void;
     },
-  ): unknown;
+  ): { get(): unknown };
 }
 
 export const SETTINGS_NAMESPACE = "llm-verifier";
@@ -31,6 +31,11 @@ export interface VerifierSettings {
   maxConcurrentCandidates: number;
   candidateProfile: string;
   reviewMode: ReviewMode;
+  reviewerProvider: string;
+  reviewerModel: string;
+  reviewerReasoningEffort: string;
+  reviewerMaxTokens: number;
+  reviewerTimeoutMs: number;
   reviewSingleEligible: boolean;
   reviewFailurePolicy: "stop" | "parent_agent";
   validationMode: "auto" | "configured";
@@ -48,11 +53,43 @@ export interface VerifierSettings {
   stateDirectory: string;
 }
 
+/** Run-time settings: the namespace section plus the process-execution secrets the UI never edits. */
+export type RunSettings = VerifierSettings & {
+  dshExecutable: string;
+  dshHomeDirectory?: string;
+};
+
 /** Scope registered for this namespace on hosts that provide settings; null on headless. */
-let registeredScope: unknown = null;
+let registeredScope: { get(): unknown } | null = null;
+let registeredProvider: {
+  describe(): { namespaces: Array<{ ns: string; revision: number }> };
+} | null = null;
 
 export function registeredVerifierScope(): unknown {
   return registeredScope;
+}
+
+/**
+ * Snapshot the resolved settings for one run. The host scope already layers
+ * schema defaults, the composition base, and the user document; the fallback
+ * covers headless hosts where no settings provider exists.
+ */
+export function resolveRunSettings(fallback: RunSettings): {
+  section: RunSettings;
+  settingsRevision: number | null;
+} {
+  if (registeredScope === null) {
+    return { section: fallback, settingsRevision: null };
+  }
+  const section = registeredScope.get() as RunSettings;
+  let settingsRevision: number | null = null;
+  if (registeredProvider !== null) {
+    const descriptor = registeredProvider
+      .describe()
+      .namespaces.find((namespace) => namespace.ns === SETTINGS_NAMESPACE);
+    settingsRevision = descriptor?.revision ?? null;
+  }
+  return { section, settingsRevision };
 }
 
 export const VerifierSettingsSchema = z.object({
@@ -65,6 +102,11 @@ export const VerifierSettingsSchema = z.object({
     z.const("dsh_model"),
     z.const("deepseek_verifier"),
   ]).default("parent_agent"),
+  reviewerProvider: z.string().default(""),
+  reviewerModel: z.string().default(""),
+  reviewerReasoningEffort: z.string().default(""),
+  reviewerMaxTokens: z.natural().min(256).max(32_768).default(4_096),
+  reviewerTimeoutMs: z.natural().min(1).default(300_000),
   reviewSingleEligible: z.boolean().default(true),
   reviewFailurePolicy: z.union([
     z.const("stop"),
@@ -110,19 +152,36 @@ export function validateVerifierSettings(value: VerifierSettings): void {
       `reviewMode 'deepseek_verifier' requires a DeepSeek verifierModel, got ${JSON.stringify(value.verifierModel)}`,
     );
   }
+  if (value.reviewMode === "dsh_model") {
+    if (value.reviewerProvider.trim().length === 0 || value.reviewerModel.trim().length === 0) {
+      throw new Error(
+        "reviewMode 'dsh_model' requires both reviewerProvider and reviewerModel",
+      );
+    }
+  }
+  if (value.reviewerTimeoutMs > value.runTimeoutMs) {
+    throw new Error(
+      `invalid reviewerTimeoutMs ${value.reviewerTimeoutMs}: must not exceed runTimeoutMs ${value.runTimeoutMs}`,
+    );
+  }
 }
 
 /** Flatten a resolved runtime config back to namespace field names for the composition base layer. */
 export function settingsBaseFrom(
   defaultCandidateCount: number,
   runtimeConfig: RuntimeConfig,
-): VerifierSettings {
+): RunSettings {
   return {
     enabled: true,
     defaultCandidateCount,
     maxConcurrentCandidates: 3,
     candidateProfile: runtimeConfig.candidateProfile,
     reviewMode: "parent_agent",
+    reviewerProvider: "",
+    reviewerModel: "",
+    reviewerReasoningEffort: "",
+    reviewerMaxTokens: 4_096,
+    reviewerTimeoutMs: 300_000,
     reviewSingleEligible: true,
     reviewFailurePolicy: "stop",
     validationMode: "auto",
@@ -138,6 +197,8 @@ export function settingsBaseFrom(
     runTimeoutMs: runtimeConfig.runTimeoutMs,
     maxVerifierTraceBytes: runtimeConfig.maxVerifierTraceBytes,
     stateDirectory: runtimeConfig.stateDirectory,
+    dshExecutable: runtimeConfig.dshExecutable,
+    ...(runtimeConfig.dshHomeDirectory === undefined ? {} : { dshHomeDirectory: runtimeConfig.dshHomeDirectory }),
   };
 }
 
@@ -150,7 +211,13 @@ export function registerVerifierSettings(ctx: Context, base: VerifierSettings): 
   const owner = ctx as Context & {
     inject?: (
       services: string[],
-      callback: (scoped: Context & { settings: SettingsProviderLike }) => void,
+      callback: (
+        scoped: Context & {
+          settings: SettingsProviderLike & {
+            describe(): { namespaces: Array<{ ns: string; revision: number }> };
+          };
+        },
+      ) => void,
     ) => void;
   };
   if (typeof owner.inject !== "function") {
@@ -162,5 +229,6 @@ export function registerVerifierSettings(ctx: Context, base: VerifierSettings): 
       applies: "live",
       validate: validateVerifierSettings,
     });
+    registeredProvider = scoped.settings;
   });
 }

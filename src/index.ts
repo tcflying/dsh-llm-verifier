@@ -7,8 +7,15 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { CandidateCount, RuntimeConfig } from "./config.ts";
-import { applyVerifiedWinner, rollbackVerifiedWinner, runVerifiedBestOf } from "./core.ts";
-import { registerVerifierSettings, settingsBaseFrom } from "./settings.ts";
+import {
+  applyVerifiedWinner,
+  rollbackVerifiedWinner,
+  runVerifiedBestOf,
+  selectVerifiedCandidate,
+} from "./core.ts";
+import { registerVerifierSettings, resolveRunSettings, settingsBaseFrom } from "./settings.ts";
+import { reviewCandidatesWithDshModel, type LlmRuntimeLike } from "./reviewer.ts";
+import type { ReviewWithModelRequest } from "./contracts.ts";
 import { runPythonVerifier } from "./verifier.ts";
 
 export const name = "llm-verifier";
@@ -135,20 +142,20 @@ const verifiedBestOfOutputSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    schemaVersion: { type: "integer", const: 1, required: true },
+    schemaVersion: { type: "integer", enum: [1, 2], required: true },
     runId: { type: "string", required: true },
     baseCommit: { type: "string", required: true },
-    requestedCandidateCount: { type: "integer", enum: [3, 5], required: true },
+    requestedCandidateCount: { type: "integer", enum: [1, 2, 3, 4, 5], required: true },
     completedCandidateCount: { type: "integer", required: true },
     eligibleCandidateCount: { type: "integer", required: true },
     status: {
       type: "string",
-      enum: ["failed", "no_winner", "winner_selected"],
+      enum: ["failed", "no_winner", "winner_selected", "review_pending"],
       required: true,
     },
     selectionMethod: {
       oneOf: [
-        { type: "string", enum: ["llm_verifier", "validation_only", "parent_agent_review"] },
+        { type: "string", enum: ["llm_verifier", "validation_only", "parent_agent_review", "dsh_model"] },
         { type: "null" },
       ],
       required: true,
@@ -174,6 +181,28 @@ const verifiedBestOfOutputSchema = {
       required: true,
     },
     failure: {
+      oneOf: [{ type: "string" }, { type: "null" }],
+      required: true,
+    },
+    review: { type: "json" },
+    resolvedConfig: { type: "json" },
+    settingsRevision: {
+      oneOf: [{ type: "integer" }, { type: "null" }],
+    },
+  },
+} as const;
+
+const selectVerifiedCandidateOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    schemaVersion: { type: "integer", const: 2, required: true },
+    runId: { type: "string", required: true },
+    candidateId: { type: "string", required: true },
+    reason: { type: "string", required: true },
+    status: { type: "string", enum: ["selected"], required: true },
+    selectedAt: { type: "string", required: true },
+    sessionId: {
       oneOf: [{ type: "string" }, { type: "null" }],
       required: true,
     },
@@ -227,11 +256,25 @@ export function skipsInteractiveApproval(
 
 export function apply(ctx: Context, config: Config = {}): void {
   const { defaultCandidateCount, runtimeConfig } = resolvePluginConfig(config);
-  registerVerifierSettings(ctx, settingsBaseFrom(defaultCandidateCount, runtimeConfig));
+  const fallbackRunSettings = settingsBaseFrom(defaultCandidateCount, runtimeConfig);
+  registerVerifierSettings(ctx, fallbackRunSettings);
+  // The host LLM runtime is optional (headless profiles): reviewMode
+  // 'dsh_model' degrades per reviewFailurePolicy when it is absent.
+  let llmRuntime: unknown = null;
+  {
+    const owner = ctx as Context & {
+      inject?: (services: string[], callback: (scoped: { llm?: unknown }) => void) => void;
+    };
+    if (typeof owner.inject === "function") {
+      owner.inject(["llm"], (scoped) => {
+        llmRuntime = scoped.llm ?? null;
+      });
+    }
+  }
 
   ctx.tools.register(defineTool({
     name: "verified_best_of",
-    description: "Run 3 or 5 isolated coding candidates, test them, and select a verified patch without changing the current repository. Sessions with approval policy 'never' (unattended) proceed without the interactive ask.",
+    description: "Run 1-5 isolated coding candidates in git worktrees, validate them, and route the eligible set through the configured reviewer (settings page: parent agent, a DSH model, or the DeepSeek verifier) without changing the current repository. Parent-agent review returns review_pending; record the choice with select_verified_candidate. Sessions with approval policy 'never' (unattended) proceed without the interactive ask.",
     parameters: {
       task: {
         type: "string",
@@ -240,9 +283,8 @@ export function apply(ctx: Context, config: Config = {}): void {
       },
       candidateCount: {
         type: "integer",
-        enum: [3, 5],
-        default: defaultCandidateCount,
-        description: "Number of isolated candidates. Defaults to 3; use 5 for higher-value tasks.",
+        enum: [1, 2, 3, 4, 5],
+        description: "Override the configured candidate count for this run (1-5). Omit to use the settings-page default.",
       },
       validationCommands: {
         type: "array",
@@ -267,32 +309,40 @@ export function apply(ctx: Context, config: Config = {}): void {
           }),
           `Report: ${value.reportPath}.`,
           value.winnerPatchPath === null ? "No patch is available." : `Patch: ${value.winnerPatchPath}. Apply only with apply_verified_winner.`,
-          ...(value.selectionMethod === "parent_agent_review" && value.eligibleCandidateCount > 0 ? [
-            "SELECTION METHOD: parent_agent_review. You (the parent agent) should review each candidate's changes and decide which is best.",
-            `To select a different candidate, call apply_verified_winner with candidateId set to the preferred candidate ID.`,
+          ...(value.status === "review_pending" ? [
+            "SELECTION REQUIRED: this run is review_pending. You (the parent agent) must review the candidate diffs and call select_verified_candidate with runId, candidateId, and a reason.",
             `Available candidates: ${value.ranking.map((r) => r.candidateId).join(", ")}.`,
+            "After the selection is recorded, apply it with apply_verified_winner.",
+          ] : []),
+          ...(value.status === "winner_selected" && value.selectionMethod === "dsh_model" ? [
+            `REVIEWER: ${String((value.review as { provider: string; model: string; selectedId: string } | null)?.provider ?? "?")}/${String((value.review as { provider: string; model: string; selectedId: string } | null)?.model ?? "?")} selected ${String((value.review as { provider: string; model: string; selectedId: string } | null)?.selectedId ?? "?")}.`,
           ] : []),
           value.failure === null ? "" : `Failure: ${value.failure}`,
         ].filter((line) => line.length > 0).join("\n"),
       }],
     },
-    timeoutMs: runtimeConfig.runTimeoutMs + 60_000,
+    timeoutMs: 100 * 60_000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
       const repositoryPath = exec.agent?.session.header.cwd;
       if (repositoryPath === undefined) {
         throw new Error("verified_best_of requires a calling agent with a session cwd");
       }
+      const { section: runSettings, settingsRevision } = resolveRunSettings(fallbackRunSettings);
+      if (!runSettings.enabled) {
+        throw new Error("verified_best_of is disabled by the llm-verifier settings (enabled: false)");
+      }
       let operationCredential: string | undefined;
       return runVerifiedBestOf(
         {
           task: args.task,
-          candidateCount: args.candidateCount ?? defaultCandidateCount,
+          ...(args.candidateCount === undefined ? {} : { candidateCount: args.candidateCount }),
           ...(args.validationCommands === undefined ? {} : { validationCommands: args.validationCommands }),
           repositoryPath,
+          settingsRevision,
           signal: exec.signal,
         },
-        runtimeConfig,
+        runSettings,
         {
           requestApproval: async (reason, signal) => {
             const agent = exec.agent;
@@ -311,7 +361,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             }), "verified_best_of");
           },
           resolveCredential: async () => {
-            const resolvedCredential = await ctx.credentials.resolve(credentialRef(runtimeConfig.credentialRef));
+            const resolvedCredential = await ctx.credentials.resolve(credentialRef(runSettings.credentialRef));
             // Absence is not fatal here: validation-only runs complete without
             // a verifier credential. runVerifiedBestOf enforces the requirement
             // only when LLM ranking is actually needed.
@@ -323,13 +373,17 @@ export function apply(ctx: Context, config: Config = {}): void {
           },
           runVerifier: async (request) => {
             if (operationCredential === undefined || operationCredential.length === 0) {
-              throw new Error(`credential ${runtimeConfig.credentialRef} is not configured`);
+              throw new Error(`credential ${runSettings.credentialRef} is not configured`);
             }
             return runPythonVerifier(request, {
-              config: runtimeConfig,
+              config: runSettings,
               credentialValue: operationCredential,
             });
           },
+          ...(llmRuntime === null ? {} : {
+            reviewCandidates: (request: ReviewWithModelRequest) =>
+              reviewCandidatesWithDshModel(llmRuntime as LlmRuntimeLike, request),
+          }),
         },
       );
     },
@@ -368,7 +422,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         ].filter((line) => line.length > 0).join(String.fromCharCode(10)),
       }],
     },
-    timeoutMs: runtimeConfig.validationTimeoutMs + 60_000,
+    timeoutMs: 30 * 60_000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
       const repositoryPath = exec.agent?.session.header.cwd;
@@ -377,7 +431,57 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
       return rollbackVerifiedWinner(
         { runId: args.runId, repositoryPath, signal: exec.signal },
-        runtimeConfig,
+        resolveRunSettings(fallbackRunSettings).section,
+      );
+    },
+  }));
+  ctx.tools.register(defineTool({
+    name: "select_verified_candidate",
+    description: "Record an explicit winner selection for a verified_best_of run that is review_pending (parent-agent review mode). Provide the chosen candidateId and a non-empty reason; then apply with apply_verified_winner.",
+    parameters: {
+      runId: {
+        type: "string",
+        required: true,
+        description: "The runId of the review_pending verified_best_of run.",
+      },
+      candidateId: {
+        type: "string",
+        required: true,
+        description: "The eligible candidate you choose as the winner after reviewing the diffs.",
+      },
+      reason: {
+        type: "string",
+        required: true,
+        description: "Why this candidate wins, citing concrete diff evidence. Recorded verbatim in the audit trail.",
+      },
+    },
+    output: {
+      schema: selectVerifiedCandidateOutputSchema,
+      render: (_args, value) => [{
+        type: "text",
+        text: [
+          `Selection recorded: ${value.candidateId} for run ${value.runId}.`,
+          `Reason: ${value.reason}`,
+          "Now apply it with apply_verified_winner.",
+        ].join("\n"),
+      }],
+    },
+    timeoutMs: 5 * 60_000,
+    isConcurrencySafe: () => false,
+    async execute(args, exec) {
+      const repositoryPath = exec.agent?.session.header.cwd;
+      if (repositoryPath === undefined) {
+        throw new Error("select_verified_candidate requires a calling agent with a session cwd");
+      }
+      return selectVerifiedCandidate(
+        {
+          runId: args.runId,
+          repositoryPath,
+          candidateId: args.candidateId,
+          reason: args.reason,
+          ...(exec.agent?.session.id === undefined ? {} : { sessionId: exec.agent.session.id }),
+        },
+        resolveRunSettings(fallbackRunSettings).section,
       );
     },
   }));
@@ -392,7 +496,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       },
       candidateId: {
         type: "string",
-        description: "Override: apply this specific candidate instead of the auto-selected winner. Use when selectionMethod is parent_agent_review.",
+        description: "Optional on legacy v1 runs only. On v2 review_pending runs the recorded select_verified_candidate choice is applied; passing a different candidateId is rejected.",
       },
     },
     output: {
@@ -407,7 +511,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         ].filter((line) => line.length > 0).join("\n"),
       }],
     },
-    timeoutMs: runtimeConfig.validationTimeoutMs * 10 + 60_000,
+    timeoutMs: 100 * 60_000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
       const repositoryPath = exec.agent?.session.header.cwd;
@@ -416,7 +520,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
       return applyVerifiedWinner(
         { runId: args.runId, repositoryPath, signal: exec.signal, ...(args.candidateId !== undefined ? { candidateId: args.candidateId } : {}) },
-        runtimeConfig,
+        resolveRunSettings(fallbackRunSettings).section,
         {
           requestApproval: async (reason, signal) => {
             const agent = exec.agent;
@@ -436,7 +540,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           },
           resolveCredential: async () => {
             const resolvedCredential = await ctx.credentials.resolve(
-              credentialRef(runtimeConfig.credentialRef),
+              credentialRef(resolveRunSettings(fallbackRunSettings).section.credentialRef),
             );
             // Only used for log redaction; an unconfigured credential means
             // there is nothing to redact.

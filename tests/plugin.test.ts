@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { apply, skipsInteractiveApproval } from "../src/index.ts";
-import { SETTINGS_NAMESPACE, validateVerifierSettings } from "../src/settings.ts";
+import { SETTINGS_NAMESPACE, validateVerifierSettings, type VerifierSettings } from "../src/settings.ts";
 
 describe("Cordis plugin", () => {
-  it("registers the three public tools", () => {
+  it("registers the four public tools", () => {
     const registeredToolNames: string[] = [];
     const context = {
       tools: {
@@ -17,28 +17,32 @@ describe("Cordis plugin", () => {
 
     apply(context as never, {});
 
-    assert.deepEqual(registeredToolNames, ["verified_best_of", "rollback_verified_winner", "apply_verified_winner"]);
+    assert.deepEqual(registeredToolNames, ["verified_best_of", "rollback_verified_winner", "select_verified_candidate", "apply_verified_winner"]);
   });
 
   it("registers the settings namespace when the host provides settings", () => {
     const registrations: Array<{ ns: string; options: { applies?: string } }> = [];
+    const injectCalls: string[][] = [];
     const context = {
       tools: { register() {} },
       inject(services: string[], callback: (scoped: never) => void) {
-        assert.deepEqual(services, ["settings"]);
-        callback({
-          settings: {
-            register(ns: string, _schema: unknown, options: { applies?: string }) {
-              registrations.push({ ns, options });
-              return { scope: true };
+        injectCalls.push(services);
+        if (services[0] === "settings") {
+          callback({
+            settings: {
+              register(ns: string, _schema: unknown, options: { applies?: string }) {
+                registrations.push({ ns, options });
+                return { get: () => null };
+              },
             },
-          },
-        } as never);
+          } as never);
+        }
       },
     };
 
     apply(context as never, {});
 
+    assert.deepEqual(injectCalls, [["settings"], ["llm"]]);
     assert.equal(registrations.length, 1);
     assert.equal(registrations[0]?.ns, SETTINGS_NAMESPACE);
     assert.equal(registrations[0]?.options.applies, "live");
@@ -56,16 +60,21 @@ describe("Cordis plugin", () => {
 
     apply(context as never, {});
 
-    assert.equal(registeredToolNames.length, 3);
+    assert.equal(registeredToolNames.length, 4);
   });
 
   it("rejects cross-field-invalid settings sections", () => {
-    const base = {
+    const base: VerifierSettings = {
       enabled: true,
       defaultCandidateCount: 3,
       maxConcurrentCandidates: 3,
       candidateProfile: "headless",
       reviewMode: "parent_agent",
+      reviewerProvider: "",
+      reviewerModel: "",
+      reviewerReasoningEffort: "",
+      reviewerMaxTokens: 4_096,
+      reviewerTimeoutMs: 30_000,
       reviewSingleEligible: true,
       reviewFailurePolicy: "stop",
       validationMode: "auto",
