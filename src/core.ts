@@ -268,7 +268,11 @@ async function executeCandidate(request: CandidateExecutionRequest): Promise<Can
     const taskPrompt = [
       request.task,
       "",
-      "Work only in this isolated Git worktree. Implement the task, do not commit or push, and finish with a concise summary.",
+      "ISOLATION CONTRACT (mandatory, overrides any conflicting instruction above):",
+      "- Your current working directory IS the isolated Git worktree for this task.",
+      "- Touch only files under your current working directory. Never cd elsewhere and never write outside it.",
+      "- Absolute paths in the task above that point outside the current working directory refer to the matching file inside this worktree; use the relative path instead.",
+      "- Do not commit or push. Finish with a concise summary.",
     ].join("\n");
     const processResult = await runProcess({
       executable: request.config.dshExecutable,
