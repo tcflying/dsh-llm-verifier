@@ -466,23 +466,45 @@ function reviewWithMcodeModel(run, passed) {
     "",
     diffs,
   ].join("\n");
+  const lenientPrompt = prompt + "\n\nRespond with ONLY a JSON object, no prose, no fences: " +
+    '{"scores":[{"candidateId":"candidate-1","score":0,"risks":"..."}],"selected":"<top-scored candidateId>"}';
+
+  const execReview = (useSchema, p) => {
+    const args = ["exec", "--cwd", run.repoPath, "--permission", "off",
+      "--timeout", `${cfg.reviewTimeoutMin}m`, "--output-format", "json",
+      ...(useSchema ? ["--output-schema", schemaPath] : []),
+      "--input", "-", ...(cfg.reviewerModel ? ["--model", cfg.reviewerModel] : [])];
+    return spawnSync(MCODE_BIN, args,
+      { encoding: "utf8", shell: process.platform === "win32", input: p,
+        timeout: cfg.reviewTimeoutMin * MIN + 30_000 });
+  };
+  const parseSchemaJson = (s) => {
+    if (!s) return {};
+    try { return JSON.parse(s); } catch {}
+    const m = s.match(/\{[\s\S]*"scores"[\s\S]*\}/);
+    if (m) { try { return JSON.parse(m[0]); } catch {} }
+    try { return JSON.parse(s.slice(s.indexOf("{"), s.lastIndexOf("}") + 1)); } catch {}
+    return {};
+  };
+  const extractResult = (stdout) => {
+    for (const line of (stdout || "").split("\n")) {
+      const t = line.trim();
+      if (t.startsWith("{") && t.includes('"exec.result"')) {
+        try { return JSON.parse(t); } catch {}
+      }
+    }
+    return null;
+  };
   const started = Date.now();
-  // synchronous here for simplicity: review is one bounded exec call
-  const sync = spawnSync(MCODE_BIN,
-    ["exec", "--cwd", run.repoPath, "--permission", "off",
-     "--timeout", `${cfg.reviewTimeoutMin}m`, "--output-format", "json",
-     "--output-schema", schemaPath, "--input", "-",
-     ...(cfg.reviewerModel ? ["--model", cfg.reviewerModel] : [])],
-    { encoding: "utf8", shell: process.platform === "win32", input: prompt,
-      timeout: cfg.reviewTimeoutMin * MIN + 30_000 });
-  const durationMs = Date.now() - started;
-  let result = null;
-  for (const line of (sync.stdout || "").split("\n")) {
-    const t = line.trim();
-    if (t.startsWith("{") && t.includes('"exec.result"')) { try { result = JSON.parse(t); } catch {} }
+  let sync = execReview(true, prompt);
+  let result = extractResult(sync.stdout);
+  let parsed = parseSchemaJson(result?.output);
+  if (!Array.isArray(parsed.scores) || parsed.scores.length === 0) {
+    sync = execReview(false, lenientPrompt);   // schema path failed → bare-JSON retry
+    result = extractResult(sync.stdout);
+    parsed = parseSchemaJson(result?.output);
   }
-  let parsed = {};
-  try { parsed = JSON.parse(result?.output || "{}"); } catch {}
+  const durationMs = Date.now() - started;
   const scores = Array.isArray(parsed.scores) ? parsed.scores : [];
   let selected = parsed.selected;
   const valid = new Set(passed.map((c) => c.candidateId));
