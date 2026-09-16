@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "llm-verifier",
+  "version": "1.0.0",
+  "description": "LLM Verifier — best-of-N candidate generation in isolated git worktrees with validation, review routing (parent_agent / mcode_model) and select/apply/rollback of the winning patch. Tools: verified_best_of, select_verified_candidate, apply_verified_winner, rollback_verified_winner, verifier_configure, verifier_get_config."
+}

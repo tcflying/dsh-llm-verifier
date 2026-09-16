@@ -1,0 +1,25 @@
+{
+  "status": "review_pending",
+  "runId": "20260916225120-7e32cf",
+  "winnerId": null,
+  "reportPath": "C:\\Users\\datoo\\.minimax\\plugins\\llm-verifier\\data\\runs\\20260916225120-7e32cf\\report.md",
+  "manifestPath": "C:\\Users\\datoo\\.minimax\\plugins\\llm-verifier\\data\\runs\\20260916225120-7e32cf\\manifest.json",
+  "nextSteps": [
+    "Read C:\\Users\\datoo\\.minimax\\plugins\\llm-verifier\\data\\runs\\20260916225120-7e32cf\\report.md and each candidate patch (candidate-N.patch in the run dir).",
+    "Call select_verified_candidate with your choice, then apply_verified_winner."
+  ],
+  "candidates": [
+    {
+      "candidateId": "candidate-1",
+      "diffStat": "src/slugify.js | 8 ++++++--\n 1 file changed, 6 insertions(+), 2 deletions(-)",
+      "validation": "passed",
+      "patchPath": "C:\\Users\\datoo\\.minimax\\plugins\\llm-verifier\\data\\runs\\20260916225120-7e32cf\\candidate-1.patch"
+    },
+    {
+      "candidateId": "candidate-2",
+      "diffStat": "src/slugify.js | 8 ++++++--\n 1 file changed, 6 insertions(+), 2 deletions(-)",
+      "validation": "passed",
+      "patchPath": "C:\\Users\\datoo\\.minimax\\plugins\\llm-verifier\\data\\runs\\20260916225120-7e32cf\\candidate-2.patch"
+    }
+  ]
+}

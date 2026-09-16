@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "llm-verifier": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:/Users/datoo/.minimax/plugins/llm-verifier/.minimax-plugin/mcp-server.mjs"
+      ],
+      "timeout": 3600000
+    }
+  }
+}

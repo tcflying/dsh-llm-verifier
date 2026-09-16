@@ -1,0 +1,17 @@
+diff --git a/src/slugify.js b/src/slugify.js
+index b720fa1..d36665c 100644
+--- a/src/slugify.js
++++ b/src/slugify.js
+@@ -1,5 +1,9 @@
+ function slugify(title) {
+-  return title.toLowerCase();
++  return title
++    .toLowerCase()
++    .trim()
++    .replace(/[\s\p{P}]+/gu, '-')
++    .replace(/^-+|-+$/g, '');
+ }
+ 
+-module.exports = { slugify };
++module.exports = { slugify };
+\ No newline at end of file
