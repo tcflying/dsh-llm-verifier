@@ -54,3 +54,8 @@ MiniMax Code 插件体系无原生工具注册/设置卡片，本插件采用 **
 
 - **SKILL 落位**：CLI/桌面不发现未走 marketplace 的插件目录内 skill——必须另拷 SKILL.md 到 `~/.minimax/skills/llm-verifier/`（已做，探针 SKILL=yes）。插件目录内保留副本供 marketplace 化后使用。
 - **--output-schema 实测**：minimax-legacy(M3) 与原生 minimax(M2.7) 均报 "Structured output was not valid JSON"，opencodex gpt-6-astra 配额轮换冷却中——本机当前**无模型可用结构化输出**，服务端的"裸 JSON 重试+宽松解析"兜底是唯一可用评审路径（已真实验证 60/75 含风险分析）。
+
+## ZCode 移植（同引擎第三端）
+
+ZCode 的 MCP 注册点：`~/.zcode/cli/config.json -> mcp.servers`（用户级，ima/openviking 同款模式）。
+安装动作：拷 `mcp-server.mjs + SKILL.md` 到 `~/.zcode/skills/llm-verifier/`，注册时**用 env LLM_VERIFIER_DATA 指到 `~/.zcode/llm-verifier-data`**（各宿主数据目录互不污染）。新开的 ZCode 会话即获得 `mcp__llm-verifier__*` 六工具。备份：config.json.bak-llmverifier。
