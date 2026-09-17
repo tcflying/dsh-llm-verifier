@@ -49,3 +49,8 @@ MiniMax Code 插件体系无原生工具注册/设置卡片，本插件采用 **
 
 - 确定性 e2e（mock mcode）：协议冒烟 + 全状态机（review_pending→select→apply→rollback→re-apply、非法操作拒绝）
 - 真实 e2e：`G:\zcode-project\llm-verify\mcode-e2e\slug-repo`，3 个失败测试 → verified_best_of(2) → 真实候选代理 → review/apply → npm test 3 pass / 0 fail
+
+## 二轮补验结论（2026-09-17）
+
+- **SKILL 落位**：CLI/桌面不发现未走 marketplace 的插件目录内 skill——必须另拷 SKILL.md 到 `~/.minimax/skills/llm-verifier/`（已做，探针 SKILL=yes）。插件目录内保留副本供 marketplace 化后使用。
+- **--output-schema 实测**：minimax-legacy(M3) 与原生 minimax(M2.7) 均报 "Structured output was not valid JSON"，opencodex gpt-6-astra 配额轮换冷却中——本机当前**无模型可用结构化输出**，服务端的"裸 JSON 重试+宽松解析"兜底是唯一可用评审路径（已真实验证 60/75 含风险分析）。
