@@ -59,3 +59,10 @@ MiniMax Code 插件体系无原生工具注册/设置卡片，本插件采用 **
 
 ZCode 的 MCP 注册点：`~/.zcode/cli/config.json -> mcp.servers`（用户级，ima/openviking 同款模式）。
 安装动作：拷 `mcp-server.mjs + SKILL.md` 到 `~/.zcode/skills/llm-verifier/`，注册时**用 env LLM_VERIFIER_DATA 指到 `~/.zcode/llm-verifier-data`**（各宿主数据目录互不污染）。新开的 ZCode 会话即获得 `mcp__llm-verifier__*` 六工具。备份：config.json.bak-llmverifier。
+
+## Codex + jcode 移植（同引擎第四、五端）
+
+- **Codex**（codex-cli 0.153.4）：`codex mcp add llm-verifier --env LLM_VERIFIER_DATA=C:/Users/datoo/.codex/llm-verifier-data -- node "C:/Users/datoo/.zcode/skills/llm-verifier/mcp-server.mjs"`，`codex mcp list` 确认 enabled。config.toml 自动写入 `[mcp_servers.llm-verifier]`。
+- **jcode**：`~/.jcode/mcp.json -> servers`（{"command","args","env"}，同 Claude 形态）+ SKILL.md 拷到 `~/.jcode/skills/llm-verifier/`。数据目录 `~/.jcode/llm-verifier-data`。
+- 两家均指向同一份引擎文件（`.zcode/skills/llm-verifier/mcp-server.mjs`，宿主无关），数据目录按宿主隔离。
+- 备份：jcode mcp.json.bak-llmverifier / codex config.toml.bak-llmverifier。
