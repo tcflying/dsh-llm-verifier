@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { apply, skipsInteractiveApproval } from "../src/index.ts";
-import { SETTINGS_NAMESPACE, validateVerifierSettings, type VerifierSettings } from "../src/settings.ts";
+import { apply, Config, skipsInteractiveApproval } from "../src/index.ts";
+import {
+  expandStateDirectory,
+  SETTINGS_NAMESPACE,
+  VerifierSettingsSchema,
+  validateVerifierSettings,
+  type VerifierSettings,
+} from "../src/settings.ts";
 
 describe("Cordis plugin", () => {
   it("registers the four public tools", () => {
@@ -106,6 +112,35 @@ describe("Cordis plugin", () => {
     );
   });
 
+  it("refuses a timeout that setTimeout would silently clamp to 1ms", () => {
+    // `setTimeout(fn, 2_147_483_648)` fires after 1ms and only warns, so a
+    // hand-edited settings document with a huge timeout would abort every run the
+    // instant it starts. The ceiling is 7 days, the same limit the portable
+    // engine enforces, and it has to be refused at load with the field named.
+    const fields = ["candidateTimeoutMs", "validationTimeoutMs", "runTimeoutMs"] as const;
+    // Both config layers carry the ceiling: the settings document and the plugin
+    // config file, which are parsed by separate schemas.
+    const layers = [
+      { label: "settings", parse: (values: Record<string, number>) => VerifierSettingsSchema(values as never) as Record<string, number> },
+      { label: "config", parse: (values: Record<string, number>) => Config(values as never) as Record<string, number> },
+    ];
+    for (const { label, parse } of layers) {
+      for (const key of fields) {
+        const read = (value: number): number | undefined => parse({ [key]: value })[key];
+        assert.throws(
+          () => read(604_800_001),
+          (error: unknown) => {
+            assert.match(String(error), new RegExp(key));
+            assert.match(String(error), /604800000/);
+            return true;
+          },
+          `${label} ${key} above the ceiling must be refused and named in the message`,
+        );
+        assert.equal(read(604_800_000), 604_800_000, `${label} ${key} at the ceiling must be accepted`);
+      }
+    }
+  });
+
   it("rejects a verifier model from another provider", () => {
     const context = {
       tools: {
@@ -128,5 +163,77 @@ describe("Cordis plugin", () => {
     assert.equal(skipsInteractiveApproval("ask", "never"), false);
     assert.equal(skipsInteractiveApproval(undefined, undefined), false);
     assert.equal(skipsInteractiveApproval("ask", undefined), false);
+  });
+
+  it("gates all four tools on the enabled kill switch", async () => {
+    // `enabled: false` is the operator's stop. Reading it in one of four handlers
+    // meant storing false still let an apply, a rollback or a recorded selection
+    // through, so the switch stopped nothing that changes state.
+    interface RegisteredTool {
+      name: string;
+      execute: (args: Record<string, unknown>, exec: unknown) => Promise<unknown>;
+    }
+    const tools: RegisteredTool[] = [];
+    let enabled = false;
+    const context = {
+      tools: { register(tool: RegisteredTool) { tools.push(tool); } },
+      inject(services: string[], callback: (scoped: never) => void) {
+        if (services[0] === "settings") {
+          callback({
+            settings: {
+              register: () => ({ get: () => ({ enabled }) }),
+              describe: () => [],
+            },
+          } as never);
+        }
+      },
+    };
+    apply(context as never, {});
+    assert.deepEqual(
+      tools.map((tool) => tool.name),
+      ["verified_best_of", "rollback_verified_winner", "select_verified_candidate", "apply_verified_winner"],
+    );
+    const exec = {
+      agent: { session: { header: { cwd: "not-a-repository" }, id: "session-1" } },
+      signal: new AbortController().signal,
+      callId: "call-1",
+    };
+    const runId = "00000000-0000-4000-8000-000000000000";
+    const argumentsByTool: Record<string, Record<string, unknown>> = {
+      verified_best_of: { task: "Fix the fixture" },
+      rollback_verified_winner: { runId },
+      select_verified_candidate: { runId, candidateId: "candidate-1", reason: "smallest diff" },
+      apply_verified_winner: { runId },
+    };
+    for (const tool of tools) {
+      enabled = false;
+      await assert.rejects(
+        tool.execute(argumentsByTool[tool.name] ?? {}, exec),
+        new RegExp(`${tool.name} is disabled by the llm-verifier settings`, "u"),
+        `${tool.name} must refuse while enabled is false`,
+      );
+      // Control: with the switch on, the same call gets past the guard and fails
+      // further in, on the repository it was pointed at.
+      enabled = true;
+      const outcome = await tool.execute(argumentsByTool[tool.name] ?? {}, exec).then(
+        () => "resolved",
+        (error: unknown) => String(error),
+      );
+      assert.doesNotMatch(outcome, /is disabled by the llm-verifier settings/u, `${tool.name} must not refuse while enabled`);
+    }
+  });
+
+  it("refuses an empty DSH_HOME instead of relocating run state to the drive root", () => {
+    // `stateDirectory: "$DSH_HOME/llm-verifier"` with `DSH_HOME=""` expanded to
+    // "/llm-verifier", which is absolute, passed every check, and moved all runs,
+    // locks and patches to the system drive root. An empty DSH_HOME has no
+    // legitimate reading, so the expansion is where it is refused.
+    assert.throws(() => expandStateDirectory("$DSH_HOME/llm-verifier", ""), /invalid DSH_HOME/u);
+    assert.throws(() => expandStateDirectory("$DSH_HOME\\llm-verifier", "   "), /invalid DSH_HOME/u);
+    assert.throws(() => expandStateDirectory("$DSH_HOME", ""), /invalid DSH_HOME/u);
+    // A configured absolute path needs no home, and a real one still expands.
+    assert.equal(expandStateDirectory("C:\\tmp\\llm-verifier", ""), "C:\\tmp\\llm-verifier");
+    assert.equal(expandStateDirectory("$DSH_HOME/llm-verifier", "D:\\dsh"), "D:\\dsh/llm-verifier");
+    assert.equal(expandStateDirectory("$DSH_HOME", "D:\\dsh"), "D:\\dsh");
   });
 });

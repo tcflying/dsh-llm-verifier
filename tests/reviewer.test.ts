@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { MAX_PROCESS_OUTPUT_BYTES } from "../src/process.ts";
 import { reviewCandidatesWithDshModel, type LlmRuntimeLike } from "../src/reviewer.ts";
 
 function llmWith(response: string): LlmRuntimeLike {
@@ -67,5 +68,72 @@ describe("dsh_model reviewer", () => {
       ), { ...base }),
       /not a finite 0-100 number/,
     );
+  });
+
+  it("reports the timeout as the cause and closes the stream it stopped waiting for", async () => {
+    // A host stream that ignores `signal` must not turn the failure into
+    // "no JSON object", and the losing consumer must not keep reading.
+    let closed = false;
+    let chunksAfterSettlement = 0;
+    const hanging = {
+      stream(): AsyncIterable<{ type: string; text?: string }> {
+        return {
+          [Symbol.asyncIterator]() {
+            return {
+              next(): Promise<IteratorResult<{ type: string; text?: string }>> {
+                chunksAfterSettlement += 1;
+                return new Promise(() => {});
+              },
+              return(): Promise<IteratorResult<{ type: string; text?: string }>> {
+                closed = true;
+                return Promise.resolve({ done: true, value: undefined });
+              },
+            };
+          },
+        };
+      },
+    } as unknown as LlmRuntimeLike;
+
+    await assert.rejects(
+      () => reviewCandidatesWithDshModel(hanging, { ...base, timeoutMs: 5 }),
+      /review timed out after 5 ms/,
+    );
+    assert.equal(closed, true);
+    assert.equal(chunksAfterSettlement, 1);
+  });
+
+  it("refuses a runaway body at the cap instead of growing the string forever", async () => {
+    // `maxTokens` is a request and `signal` is already assumed ignorable, so a
+    // host that keeps streaming has to meet a ceiling: this accumulator was the
+    // one in `src/` with none.
+    let chunksStreamed = 0;
+    const runaway: LlmRuntimeLike = {
+      async *stream() {
+        for (let chunk = 0; chunk < 64; chunk += 1) {
+          chunksStreamed += 1;
+          yield { type: "text-delta", text: "a".repeat(1024 * 1024) };
+        }
+        yield { type: "finish", reason: "stop" };
+      },
+    };
+    await assert.rejects(
+      () => reviewCandidatesWithDshModel(runaway, { ...base }),
+      (error: unknown) => {
+        const message = String(error);
+        assert.match(message, new RegExp(`exceeded the ${MAX_PROCESS_OUTPUT_BYTES} byte`));
+        assert.match(message, /MAX_PROCESS_OUTPUT_BYTES/);
+        assert.match(message, /full body was not parsed/);
+        return true;
+      },
+    );
+    // Refused at the boundary, not after reading the whole 64 MiB.
+    assert.ok(chunksStreamed <= 18, `streamed ${chunksStreamed} MiB chunks before refusing`);
+  });
+
+  it("still parses an ordinary response beside the capped one", async () => {
+    const response = '{"scores": {"candidate-1": 60, "candidate-2": 61}, "selected": "candidate-2", "evidence": {}, "risks": "none"}';
+    const receipt = await reviewCandidatesWithDshModel(llmWith(response), { ...base });
+    assert.equal(receipt.selectedId, "candidate-2");
+    assert.equal(receipt.rawResponseLength, response.length);
   });
 });

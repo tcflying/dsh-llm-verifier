@@ -3,8 +3,11 @@
 
 import contextlib
 import json
+import math
 import os
+import re
 import sys
+import threading
 from typing import Any, Dict, List
 
 # The Node host writes the request as UTF-8 bytes; on Windows Python would
@@ -30,6 +33,10 @@ CRITERIA = {
         "Penalize any success claim contradicted by terminal evidence."
     ),
 }
+
+# Mirrors the caller's rule in src/settings.ts, so a model id the settings
+# document rejects never reaches this process.
+MODEL_PATTERN = re.compile(r"deepseek-[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
 def require_object(value: Any, field_name: str) -> Dict[str, Any]:
@@ -68,8 +75,10 @@ def read_request() -> Dict[str, Any]:
 def normalize_request(request: Dict[str, Any]) -> Dict[str, Any]:
     task = require_string(request.get("task"), "task")
     model = require_string(request.get("model"), "model")
-    if not model.startswith("deepseek-"):
-        raise ValueError("model must begin with 'deepseek-', got {!r}".format(model))
+    if MODEL_PATTERN.match(model) is None:
+        raise ValueError(
+            "model must begin with 'deepseek-' followed by a letter or digit, got {!r}".format(model)
+        )
     cache_path = require_string(request.get("cachePath"), "cachePath")
     if not os.path.isabs(cache_path):
         raise ValueError("cachePath must be absolute, got {!r}".format(cache_path))
@@ -117,6 +126,54 @@ def clear_competing_backend_environment() -> None:
             os.environ.pop(environment_name, None)
 
 
+class DeepSeekClient:
+    """Stand-in for the verifier client, built only when a comparison is
+    actually scored, so a run served entirely from the cache needs no key.
+
+    Handing this to `select(client=...)` keeps the library's env-driven
+    `create_client()` out of reach: that helper re-reads `<cwd>/.env`, and a
+    `.env` left in the spawn directory would otherwise repoint the backend at
+    an arbitrary host, which then receives the API key and every candidate
+    trajectory and returns the verdict. `create_deepseek_client()` pins
+    base_url to api.deepseek.com, so only DeepSeek can be the judge here.
+    """
+
+    def __init__(self, model: str) -> None:
+        self._model = model
+        self._client: Any = None
+        self._lock = threading.Lock()
+
+    def _build(self) -> Any:
+        client = self._client
+        if client is not None:
+            return client
+        # The pool shares this one wrapper: llm_verifier hands `client` to every worker
+        # (fine_grained_reward.py:860/:883), and each of them reaches `_build` through `__getattr__`
+        # at the same moment. `create_deepseek_client()` re-reads `<cwd>/.env` through `load_dotenv`,
+        # i.e. it yields the GIL on file I/O, so the unbolted check-then-act built up to `maxWorkers`
+        # clients and kept one. Double-checked under a lock: the built path stays lock-free.
+        with self._lock:
+            if self._client is None:
+                api_key = os.environ.get("DEEPSEEK_API_KEY")
+                if not api_key:
+                    raise RuntimeError(
+                        "DEEPSEEK_API_KEY is not set in the bridge process environment; "
+                        "refusing to let <cwd>/.env choose the verifier backend"
+                    )
+                from llm_verifier.fine_grained_reward import create_deepseek_client
+
+                self._client = create_deepseek_client(api_key=api_key, model=self._model)
+            return self._client
+
+    def __getattr__(self, name: str) -> Any:
+        # Without this, an instance that was never through __init__ (`__new__`, a future copy/pickle
+        # path) recurses forever: `self._client` misses __dict__ -> __getattr__ -> _build -> `self._client`.
+        # Only these three names: a blanket dunder block would stop forwarding the real client's dunders.
+        if name in ("_client", "_lock", "_model"):
+            raise AttributeError(f"{type(self).__name__} has no {name!r}: it was built without __init__")
+        return getattr(self._build(), name)
+
+
 def run_selection(request: Dict[str, Any]) -> Dict[str, Any]:
     clear_competing_backend_environment()
     import llm_verifier  # Imported after backend environment normalization.
@@ -135,11 +192,22 @@ def run_selection(request: Dict[str, Any]) -> Dict[str, Any]:
             cache=request["cache_path"],
             progress=False,
             on_error="raise",
+            client=DeepSeekClient(request["model"]),
         )
     scores = [float(score) for score in verifier_result.scores]
     ranking = [int(candidate_index) for candidate_index in verifier_result.ranking]
+    for score_index, score_value in enumerate(scores):
+        if not math.isfinite(score_value):
+            raise RuntimeError(
+                "verifier produced a non-finite score at index {}: {!r}".format(
+                    score_index, score_value
+                )
+            )
+    if len(set(scores)) < 2:
+        raise RuntimeError(
+            "verifier produced a non-discriminating score vector: {!r}".format(scores)
+        )
     token_usage = llm_verifier.USAGE.snapshot()
-    json.dumps(token_usage)
     request_count = token_usage.get("calls")
     if isinstance(request_count, bool) or not isinstance(request_count, int) or request_count < 0:
         raise RuntimeError("USAGE.snapshot() returned invalid calls: {!r}".format(request_count))
@@ -155,8 +223,8 @@ def run_selection(request: Dict[str, Any]) -> Dict[str, Any]:
 def main() -> int:
     request = normalize_request(read_request())
     result = run_selection(request)
-    json.dump(result, sys.stdout, separators=(",", ":"), sort_keys=True)
-    sys.stdout.write("\n")
+    payload = json.dumps(result, separators=(",", ":"), sort_keys=True, allow_nan=False)
+    sys.stdout.write(payload + "\n")
     return 0
 
 

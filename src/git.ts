@@ -27,29 +27,14 @@ export interface CapturedChanges {
 async function collectBinaryFileSummaries(
   worktreePath: string,
   baseCommit: string,
+  binaryPaths: ReadonlySet<string>,
   changedFiles: readonly string[],
 ): Promise<BinaryFileSummary[]> {
   const binaryFiles: BinaryFileSummary[] = [];
   for (const changedFile of changedFiles) {
-    const numstat = await runGit(
-      worktreePath,
-      ["diff", "--numstat", "--no-renames", "--no-textconv", "-z", baseCommit, "--", changedFile],
-    );
-    const numstatRecord = numstat.split("\0").find((record) => record.length > 0);
-    if (numstatRecord === undefined) {
+    if (!binaryPaths.has(changedFile)) {
       continue;
     }
-    const firstSeparator = numstatRecord.indexOf("\t");
-    const secondSeparator = numstatRecord.indexOf("\t", firstSeparator + 1);
-    if (
-      firstSeparator < 0
-      || secondSeparator < 0
-      || numstatRecord.slice(0, firstSeparator) !== "-"
-      || numstatRecord.slice(firstSeparator + 1, secondSeparator) !== "-"
-    ) {
-      continue;
-    }
-
     const changedFilePath = join(worktreePath, changedFile);
     let sizeBytes: number;
     let gitObjectHash: string;
@@ -81,6 +66,31 @@ async function collectBinaryFileSummaries(
   return binaryFiles;
 }
 
+/** Paths in `paths` that Git can find in HEAD, matched with literal pathspecs. */
+export async function pathsKnownToHead(
+  repositoryPath: string,
+  paths: readonly string[],
+): Promise<Set<string>> {
+  const known = new Set<string>();
+  for (let offset = 0; offset < paths.length; offset += 100) {
+    const batch = paths.slice(offset, offset + 100);
+    const output = await runGit(repositoryPath, [
+      "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", ...batch.map(literalPathspec),
+    ]);
+    for (const path of output.split("\0")) {
+      if (path.length > 0) {
+        known.add(path);
+      }
+    }
+  }
+  return known;
+}
+
+/** Keeps bracket/glob characters in a candidate path from being read as a pattern. */
+export function literalPathspec(path: string): string {
+  return `:(top,literal)${path}`;
+}
+
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path, constants.F_OK);
@@ -93,15 +103,15 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-export async function runGit(
+async function runGitRaw(
   repositoryPath: string,
   arguments_: readonly string[],
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<Buffer> {
   try {
     const { stdout } = await execFileAsync("git", [...arguments_], {
       cwd: repositoryPath,
-      encoding: "utf8",
+      encoding: "buffer",
       maxBuffer: MAX_GIT_OUTPUT_BYTES,
       ...(signal === undefined ? {} : { signal }),
     });
@@ -117,12 +127,36 @@ export async function runGit(
   }
 }
 
+export async function runGit(
+  repositoryPath: string,
+  arguments_: readonly string[],
+  signal?: AbortSignal,
+): Promise<string> {
+  return (await runGitRaw(repositoryPath, arguments_, signal)).toString("utf8");
+}
+
+/**
+ * Byte-exact git output for artifacts that must round-trip, such as a
+ * `--binary` patch: decoding to utf8 first would replace non-UTF-8 bytes with
+ * U+FFFD and leave a patch nothing can apply.
+ */
+export async function runGitBytes(
+  repositoryPath: string,
+  arguments_: readonly string[],
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  return runGitRaw(repositoryPath, arguments_, signal);
+}
+
 async function readOptionalGitConfig(
   repositoryPath: string,
   configKey: string,
 ): Promise<string | undefined> {
   try {
-    return (await runGit(repositoryPath, ["config", "--get", configKey])).trim();
+    // `--bool` so git answers the value: `core.sparseCheckout yes`, `on` and `1`
+    // are all enabled to git, and a client-side spelling list would be a second,
+    // worse parser for one flag.
+    return (await runGit(repositoryPath, ["config", "--bool", "--get", configKey])).trim();
   } catch (error) {
     const cause = (error as Error).cause as { code?: number } | undefined;
     if (cause?.code === 1) {
@@ -132,7 +166,11 @@ async function readOptionalGitConfig(
   }
 }
 
-export async function inspectRepository(requestedRepositoryPath: string): Promise<RepositorySnapshot> {
+export async function inspectRepository(
+  requestedRepositoryPath: string,
+  options?: { readonly requireCleanWorkingTree?: boolean },
+): Promise<RepositorySnapshot> {
+  const requireCleanWorkingTree = options?.requireCleanWorkingTree ?? true;
   const repositoryPath = await realpath(requestedRepositoryPath);
   const topLevelPath = (await runGit(repositoryPath, ["rev-parse", "--show-toplevel"])).trim();
   const canonicalTopLevelPath = await realpath(topLevelPath);
@@ -157,14 +195,18 @@ export async function inspectRepository(requestedRepositoryPath: string): Promis
     throw new Error(`unsupported repository: sparse checkout is enabled at ${repositoryPath}`);
   }
 
-  const statusOutput = (await runGit(
-    repositoryPath,
-    ["status", "--porcelain=v1", "--untracked-files=all"],
-  )).trim();
-  if (statusOutput.length > 0) {
-    throw new Error(
-      `repository must be clean; git status reported: ${statusOutput.replaceAll("\n", "; ")}`,
-    );
+  // A rollback runs against the tree an apply left behind, so the working tree
+  // is expected to be dirty there; the per-file hash guard covers user edits.
+  if (requireCleanWorkingTree) {
+    const statusOutput = (await runGit(
+      repositoryPath,
+      ["status", "--porcelain=v1", "--untracked-files=all"],
+    )).trim();
+    if (statusOutput.length > 0) {
+      throw new Error(
+        `repository must be clean; git status reported: ${statusOutput.replaceAll("\n", "; ")}`,
+      );
+    }
   }
 
   const baseCommit = (await runGit(repositoryPath, ["rev-parse", "--verify", "HEAD"])).trim();
@@ -190,7 +232,13 @@ export async function removeWorktree(
   repositoryPath: string,
   worktreePath: string,
 ): Promise<void> {
-  await runGit(repositoryPath, ["worktree", "remove", "--force", worktreePath]);
+  // The second `--force` overrides one state in particular: a killed
+  // `git worktree add` leaves its registration `locked initializing`, and git
+  // refuses a single-`--force` removal of a locked worktree — so the run that
+  // interrupted its own checkout could never clean it up. This plugin never
+  // locks a worktree, and the one case where a removal must not happen at all
+  // (a process still writing into the directory) is skipped by the caller.
+  await runGit(repositoryPath, ["worktree", "remove", "--force", "--force", worktreePath]);
 }
 
 async function markUntrackedFilesIntentToAdd(worktreePath: string): Promise<void> {
@@ -260,6 +308,48 @@ async function fileContainsBytes(filePath: string, searchedBytes: Buffer): Promi
   return false;
 }
 
+/**
+ * One `git diff --numstat -z` walk yields both lists the old two walks produced:
+ * the changed paths rollback restores, and the binary set (`-<TAB>-<TAB>path`).
+ *
+ * A record that is not exactly `added<TAB>deleted<TAB>path` with a non-empty
+ * path is a rename or copy record (rename detection makes git write
+ * `added<TAB>deleted<TAB>\0old\0new`, so the path arrives empty and the two
+ * names as extra records), or a path that contains a tab. Guessing at either
+ * would hand rollback a silently wrong path list and restore the wrong file, so
+ * the shape is refused loudly instead of parsed leniently.
+ */
+export function readNumstatRecords(numstatOutput: string): {
+  readonly changedFiles: string[];
+  readonly binaryPaths: Set<string>;
+} {
+  const records = numstatOutput.split("\0");
+  const changedFiles: string[] = [];
+  const binaryPaths = new Set<string>();
+  for (const [index, record] of records.entries()) {
+    if (record.length === 0) {
+      continue; // the trailing separator of the last record
+    }
+    const fields = record.split("\t");
+    const path = fields.length === 3 ? fields[2]! : "";
+    if (path.length === 0) {
+      // A rename record carries an empty path field and names both paths in the
+      // records that follow it.
+      const paths = records.slice(index + 1, index + 3).filter((candidate) => candidate.length > 0);
+      throw new Error(
+        `unsupported git diff --numstat record ${JSON.stringify(record)} for `
+        + `${JSON.stringify(paths.length === 0 ? [record] : paths)}: rename and copy records are not `
+        + "supported, the numstat query must keep --no-renames",
+      );
+    }
+    changedFiles.push(path);
+    if (fields[0] === "-" && fields[1] === "-") {
+      binaryPaths.add(path);
+    }
+  }
+  return { changedFiles, binaryPaths };
+}
+
 export async function captureCandidateChanges(
   worktreePath: string,
   baseCommit: string,
@@ -267,37 +357,41 @@ export async function captureCandidateChanges(
   credentialValue: string,
 ): Promise<CapturedChanges> {
   await markUntrackedFilesIntentToAdd(worktreePath);
-  const changedFilesOutput = await runGit(
+  // `--no-renames` must stay: with rename detection on, git pairs the two paths
+  // into one record, so the change set loses the deleted source and rollback
+  // never learns it was deleted — `rm` removes the destination instead of
+  // restoring both. `readNumstatRecords` refuses that record shape on the spot.
+  const numstatOutput = await runGit(
     worktreePath,
-    ["diff", "--name-only", "--no-textconv", "-z", baseCommit, "--"],
+    ["diff", "--numstat", "--no-renames", "--no-textconv", "-z", baseCommit, "--"],
   );
-  const changedFiles = changedFilesOutput.split("\0").filter((path) => path.length > 0);
+  const { changedFiles, binaryPaths } = readNumstatRecords(numstatOutput);
   if (changedFiles.length === 0) {
     throw new Error(`candidate produced no changes relative to ${baseCommit}`);
   }
   await assertChangedFilesDoNotContainCredential(worktreePath, changedFiles, credentialValue);
-  const binaryFiles = await collectBinaryFileSummaries(worktreePath, baseCommit, changedFiles);
+  const binaryFiles = await collectBinaryFileSummaries(worktreePath, baseCommit, binaryPaths, changedFiles);
 
-  const patch = await runGit(
-    worktreePath,
-    ["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", baseCommit, "--"],
-  );
+  const [patch, verifierDiff, diffStat] = await Promise.all([
+    runGitBytes(
+      worktreePath,
+      ["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", baseCommit, "--"],
+    ),
+    runGit(
+      worktreePath,
+      ["diff", "--full-index", "--no-ext-diff", "--no-textconv", baseCommit, "--"],
+    ),
+    runGit(
+      worktreePath,
+      ["diff", "--stat", "--no-ext-diff", "--no-textconv", baseCommit, "--"],
+    ).then((stat) => stat.trim()),
+  ]);
   if (credentialValue.length > 0 && patch.includes(credentialValue)) {
     throw new Error("candidate patch contains the resolved credential and was rejected");
   }
-  const verifierDiff = await runGit(
-    worktreePath,
-    ["diff", "--full-index", "--no-ext-diff", "--no-textconv", baseCommit, "--"],
-  );
-  const diffStat = (
-    await runGit(
-      worktreePath,
-      ["diff", "--stat", "--no-ext-diff", "--no-textconv", baseCommit, "--"],
-    )
-  ).trim();
   await mkdir(candidateArtifactsDirectory, { recursive: true });
   const patchPath = join(candidateArtifactsDirectory, "changes.patch");
-  await writeFile(patchPath, patch, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  await writeFile(patchPath, patch, { mode: 0o600, flag: "wx" });
   return {
     changedFiles,
     binaryFiles,

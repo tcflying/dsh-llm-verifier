@@ -284,6 +284,7 @@ python3 -m py_compile python/verifier_bridge.py
 ## 当前限制
 
 - Windows 支持通过 `cmd.exe` 与 `taskkill /T /F` 执行候选、验证与清理；Windows 无法表达的 POSIX 专属能力（进程组残留进程检测）被跳过，因此 Windows 上不会检测到遗留后台进程的候选。
+- 在 Windows 上，`verified_best_of` 会直接拒绝含 `"`、`%`、`&`、`|`、`^`、`<`、`>` 的 `task`、`candidateProfile` 或 `dshExecutable`：`dsh` 只接受命令行形式的提示词，而 `cmd.exe` 即使在引号内也会重新解释这些字符且没有任何转义写法（`%DEEPSEEK_API_KEY%` 正是在引号**内部**展开的）。此前这类任务会被静默截断，失败还被归因给候选。换行及其余字符均正常接受，上限 8000 字符（再长 `cmd` 会直接拒绝整条命令行：「文件名或扩展名太长」）。可移植的 `.mjs` 引擎不受影响：它走 stdin 传提示词。
 - 不支持脏工作区、子模块、稀疏检出或 linked worktree。
 - 候选数量固定为 3 或 5。
 - 不自动 commit、push、merge 或应用补丁。

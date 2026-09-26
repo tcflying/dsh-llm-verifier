@@ -73,7 +73,6 @@ export interface VerifiedBestOfResult {
   readonly selectionMethod:
     | "llm_verifier"
     | "validation_only"
-    | "parent_agent_review"
     | "dsh_model"
     | null;
   readonly winnerId: string | null;
@@ -151,6 +150,9 @@ export interface SelectVerifiedCandidateResult {
 export interface ApplyRuntimeDependencies {
   readonly requestApproval: (reason: string, signal: AbortSignal) => Promise<void>;
   readonly resolveCredential: () => Promise<string>;
+  /** Current value of the operator kill switch, re-read inside the apply critical
+   * section: the handler's own check sits before the approval wait. */
+  readonly isDisabled?: () => boolean;
 }
 
 export interface ApplyVerifiedWinnerResult {

@@ -112,6 +112,9 @@ export async function runPythonVerifier(
     env: verifierEnvironment,
     timeoutMs: options.config.runTimeoutMs,
     signal: request.signal,
+    // Without this the bridge's own children are never enumerated or reaped on
+    // Windows: a verifier run that leaves processes behind reports a clean exit.
+    detectResidualTree: true,
     input: JSON.stringify({
       task: request.task,
       candidates: request.candidates,
@@ -123,6 +126,11 @@ export async function runPythonVerifier(
     }),
   });
   const standardError = redactSecret(bridgeResult.stderr, options.credentialValue).trim();
+  // The reaper hands back a promise so the walk never charges a candidate's clock.
+  // This call has no sibling work left to overlap it with and the ranking is already
+  // paid for, so wait here for the bridge's own tree to go away. The answer is never
+  // a verdict: a paid ranking must not be discarded because enumeration was slow.
+  await bridgeResult.residualProcessGroup;
   if (
     bridgeResult.exitCode !== 0
     || bridgeResult.timedOut

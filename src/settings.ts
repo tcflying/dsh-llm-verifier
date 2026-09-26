@@ -1,6 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import z from "@deepseek-ai/schemastery";
-import type { RuntimeConfig } from "./config.ts";
+import { MAX_TIMEOUT_MS, type RuntimeConfig } from "./config.ts";
 
 /**
  * Structural surface of the optional host settings seam (@deepseek-ai/dsh-settings).
@@ -23,6 +23,37 @@ interface SettingsProviderLike {
 export const SETTINGS_NAMESPACE = "llm-verifier";
 
 export type ReviewMode = "parent_agent" | "dsh_model" | "deepseek_verifier";
+
+/**
+ * The default stateDirectory is written as `$DSH_HOME/...`. Config-file
+ * loading expands it; a settings-document value reaches the tools unexpanded,
+ * and no host expands it for us, so tools resolve it at the point of use.
+ */
+export function expandStateDirectory(
+  configuredStateDirectory: string,
+  dshHomeDirectory: string,
+): string {
+  const usesDshHome = configuredStateDirectory === "$DSH_HOME"
+    || configuredStateDirectory.startsWith("$DSH_HOME/")
+    || configuredStateDirectory.startsWith("$DSH_HOME\\");
+  if (usesDshHome && dshHomeDirectory.trim().length === 0) {
+    // `process.env.DSH_HOME ?? fallback` does not rescue `DSH_HOME=""`, and an
+    // empty home makes the expansion `$DSH_HOME/llm-verifier` → `/llm-verifier`
+    // → the system drive root: absolute, so it passed every check and moved all
+    // run state, locks and patches out of the user's dsh directory. An empty
+    // DSH_HOME has no legitimate reading.
+    throw new Error(
+      `invalid DSH_HOME: expanding ${JSON.stringify(configuredStateDirectory)} with an empty DSH_HOME would put all run state at the filesystem root; set DSH_HOME to a directory or configure an absolute stateDirectory`,
+    );
+  }
+  if (configuredStateDirectory === "$DSH_HOME") {
+    return dshHomeDirectory;
+  }
+  if (usesDshHome) {
+    return `${dshHomeDirectory}/${configuredStateDirectory.slice("$DSH_HOME".length + 1)}`;
+  }
+  return configuredStateDirectory;
+}
 
 /** Flat namespace section. Existing Config keys keep their names; new keys extend the same document. */
 export interface VerifierSettings {
@@ -107,7 +138,9 @@ export const VerifierSettingsSchema = z.object({
   reviewerModel: z.string().default(""),
   reviewerReasoningEffort: z.string().default(""),
   reviewerMaxTokens: z.natural().min(256).max(32_768).default(4_096),
-  reviewerTimeoutMs: z.natural().min(1).default(300_000),
+  // Bounded at the schema layer too: the `reviewerTimeoutMs <= runTimeoutMs` cross-field rule
+  // only runs inside validateVerifierSettings(), i.e. not on every path that reads a config.
+  reviewerTimeoutMs: z.natural().min(1).max(MAX_TIMEOUT_MS).default(300_000),
   reviewSingleEligible: z.boolean().default(true),
   reviewFailurePolicy: z.union([
     z.const("stop"),
@@ -128,9 +161,12 @@ export const VerifierSettingsSchema = z.object({
     z.const("max"),
   ]).default("high"),
   verifierMaxTokens: z.natural().min(1).default(32_768),
-  candidateTimeoutMs: z.natural().min(1).default(20 * 60 * 1_000),
-  validationTimeoutMs: z.natural().min(1).default(10 * 60 * 1_000),
-  runTimeoutMs: z.natural().min(1).default(45 * 60 * 1_000),
+  // The ceiling is 7 days: Node clamps a `setTimeout` delay above 2^31-1 ms down
+  // to 1 ms (it only warns), so an unbounded hand-edited value would abort every
+  // run instantly instead of honouring the config. One constant, both schema layers.
+  candidateTimeoutMs: z.natural().min(1).max(MAX_TIMEOUT_MS).default(20 * 60 * 1_000),
+  validationTimeoutMs: z.natural().min(1).max(MAX_TIMEOUT_MS).default(10 * 60 * 1_000),
+  runTimeoutMs: z.natural().min(1).max(MAX_TIMEOUT_MS).default(45 * 60 * 1_000),
   maxVerifierTraceBytes: z.natural().min(1).default(512 * 1_024),
   stateDirectory: z.string().default("$DSH_HOME/llm-verifier"),
 });

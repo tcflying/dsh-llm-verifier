@@ -286,6 +286,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. Bug reports sh
 ## Current limitations
 
 - Windows support runs candidates, validation, and cleanup through `cmd.exe` and `taskkill /T /F`; POSIX-only capabilities that Windows cannot express (process-group residual-process detection) are skipped, so a candidate that leaves a background process behind is not detected on Windows.
+- On Windows, `verified_best_of` refuses a `task`, a `candidateProfile` or a `dshExecutable` containing `"`, `%`, `&`, `|`, `^`, `<` or `>`, because `dsh` accepts its prompt only as a command-line argument and `cmd.exe` reinterprets those characters even inside quotes — none has an escape (`%DEEPSEEK_API_KEY%` expands *within* the quoted region). Previously such a task was silently truncated and the resulting failure was blamed on the candidate. Newlines and all other characters are accepted, up to an 8000-character ceiling (`cmd` refuses a longer command line outright: "The file name or extension is too long"). The portable `.mjs` engine is not affected: it passes the prompt on stdin.
 - No dirty worktrees, submodules, sparse checkouts, or linked worktrees.
 - Candidate count is fixed to 3 or 5.
 - No automatic commit, push, merge, or patch application.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -156,7 +156,60 @@ describe("Python verifier bridge", () => {
       assert.equal(response.requestCount, 0);
       assert.equal((response.tokenUsage as Record<string, unknown>).calls, 0);
     } finally {
-      await rm(fixtureDirectory, { recursive: true, force: true });
+      await rm(fixtureDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
+  });
+
+  it("builds the DeepSeek client once even when every worker asks at the same moment", async () => {
+    // llm_verifier hands the bridge's lazy wrapper to the whole worker pool, and each worker
+    // resolves it through __getattr__ -> _build(). create_deepseek_client() reads <cwd>/.env (file
+    // I/O, GIL released), so the unbolted check-then-act built one client per worker and kept one.
+    const fixtureDirectory = await mkdtemp(join(tmpdir(), "dsh-bridge-client-race-"));
+    const logPath = join(fixtureDirectory, "builds.log");
+    const scriptPath = join(fixtureDirectory, "race.py");
+    await writeFile(scriptPath, [
+      "import importlib.util, os, sys, threading, time, types",
+      "class _Stub:",
+      "    def __getattr__(self, name):",
+      "        return lambda *a, **k: None",
+      "def create_deepseek_client(api_key, model):",
+      "    time.sleep(0.05)   # widen the window the unbolted version lost in",
+      "    with open(os.environ['BRIDGE_CLIENT_LOG'], 'a', encoding='utf-8') as fh:",
+      "        fh.write('built\\n')",
+      "    return _Stub()",
+      "pkg = types.ModuleType('llm_verifier')",
+      "mod = types.ModuleType('llm_verifier.fine_grained_reward')",
+      "mod.create_deepseek_client = create_deepseek_client",
+      "pkg.fine_grained_reward = mod",
+      "sys.modules['llm_verifier'] = pkg",
+      "sys.modules['llm_verifier.fine_grained_reward'] = mod",
+      "spec = importlib.util.spec_from_file_location('vb', sys.argv[1])",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "client = module.DeepSeekClient('deepseek-v4-flash')",
+      "pool = [threading.Thread(target=lambda: getattr(client, 'chat')) for _ in range(8)]",
+      "for t in pool: t.start()",
+      "for t in pool: t.join()",
+      "print(len(open(os.environ['BRIDGE_CLIENT_LOG'], encoding='utf-8').read().splitlines()))",
+    ].join("\n"));
+    const bridgePath = join(testDirectory, "..", "python", "verifier_bridge.py");
+    const childProcess = spawn(pythonExecutable, [scriptPath, bridgePath], {
+      env: { ...process.env, DEEPSEEK_API_KEY: "sk-SENTINEL-not-a-key", BRIDGE_CLIENT_LOG: logPath },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const chunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
+    childProcess.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    childProcess.stderr.on("data", (chunk: Buffer) => errChunks.push(chunk));
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      childProcess.once("error", reject);
+      childProcess.once("close", resolve);
+    });
+    await rm(fixtureDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    // force:true swallows Windows EPERM into silence, so the cleanup is asserted, not assumed.
+    await assert.rejects(access(fixtureDirectory));
+    assert.equal(exitCode, 0, Buffer.concat(errChunks).toString("utf8"));
+    assert.equal(Buffer.concat(chunks).toString("utf8").trim(), "1",
+      "the lazy client was built more than once: _build() is not locked");
   });
 });

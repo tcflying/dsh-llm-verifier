@@ -40,9 +40,10 @@ descriptions:
 
 ## Settings
 Read or change settings with `verifier_get_config` / `verifier_configure`:
-`defaultCandidateCount`, `maxConcurrent`, `validationCommand` (empty = auto `npm test`),
+`defaultCandidateCount` (1-5), `maxConcurrent` (1-5), `validationCommand` (empty = auto `npm test`),
 `reviewMode` (`parent_agent` = you review diffs; `mcode_model` = a machine reviewer scores
-candidates), `reviewerModel`, `candidateModel`, `candidateTimeoutMin`, `totalTimeoutMin`.
+candidates), `reviewerModel`, `candidateModel`, `candidateTimeoutMin`, `totalTimeoutMin`,
+`reviewTimeoutMin` (each 1-10080 minutes, i.e. 7 days max; anything outside these ranges is refused).
 State lives under the plugin `data/runs/<runId>/` (manifest.json, report.md, candidate patches, worktrees).
 
 ## Boundaries

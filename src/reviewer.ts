@@ -1,4 +1,5 @@
 import type { JsonValue } from "./contracts.ts";
+import { MAX_PROCESS_OUTPUT_BYTES } from "./process.ts";
 
 /**
  * Structural surface of the optional host LLM runtime (@deepseek-ai/dsh-llm).
@@ -108,32 +109,57 @@ export async function reviewCandidatesWithDshModel(
     candidateSections.join("\n\n"),
   ].join("\n");
 
-  const timeout = setTimeout(
-    () => controller.abort(new Error(`review timed out after ${request.timeoutMs} ms`)),
-    request.timeoutMs,
-  );
-  timeout.unref();
+  const startedAt = Date.now();
+  let text = "";
+  let capturedBytes = 0;
   const controller = new AbortController();
   const relayAbort = (): void => controller.abort(request.signal.reason);
   if (request.signal.aborted) controller.abort(request.signal.reason);
   request.signal.addEventListener("abort", relayAbort, { once: true });
 
-  const startedAt = Date.now();
-  let text = "";
-  try {
-    const stream = llm.stream({
-      provider: request.provider,
-      model: request.model,
-      ...(request.reasoningEffort !== "" ? { reasoningEffort: request.reasoningEffort } : {}),
-      messages: [
-        { id: `review-${startedAt}`, role: "user", content: [{ type: "text", text: userText }] },
-      ],
-      system: REVIEW_SYSTEM_PROMPT,
-      maxTokens: request.maxTokens,
-      signal: controller.signal,
-    });
-    for await (const chunk of stream) {
+  const stream = llm.stream({
+    provider: request.provider,
+    model: request.model,
+    ...(request.reasoningEffort !== "" ? { reasoningEffort: request.reasoningEffort } : {}),
+    messages: [
+      { id: `review-${startedAt}`, role: "user", content: [{ type: "text", text: userText }] },
+    ],
+    system: REVIEW_SYSTEM_PROMPT,
+    maxTokens: request.maxTokens,
+    signal: controller.signal,
+  });
+  const iterator = stream[Symbol.asyncIterator]();
+  let settled = false;
+  // A host that ignores `signal` would otherwise leave this loop awaiting
+  // forever, so the timeout wins the race itself rather than only nudging the
+  // abort controller.
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new Error(`review timed out after ${request.timeoutMs} ms`)),
+      request.timeoutMs,
+    );
+    timeoutHandle.unref();
+  });
+  const consumeStream = (async (): Promise<void> => {
+    while (!settled) {
+      const next = await iterator.next();
+      if (next.done === true || settled) {
+        break;
+      }
+      const chunk = next.value;
       if (chunk.type === "text-delta" && typeof chunk.text === "string") {
+        // The one accumulator in this layer that grew without bound: `maxTokens`
+        // is a request, not a guarantee, and this loop already assumes a host may
+        // ignore `signal`. A body past the ceiling every sibling stream caps to is
+        // refused, not buffered until the host process dies.
+        capturedBytes += Buffer.byteLength(chunk.text, "utf8");
+        if (capturedBytes > MAX_PROCESS_OUTPUT_BYTES) {
+          throw new Error(
+            `reviewer response exceeded the ${MAX_PROCESS_OUTPUT_BYTES} byte MAX_PROCESS_OUTPUT_BYTES cap: `
+            + `only ${String(text.length)} characters were kept, the full body was not parsed`,
+          );
+        }
         text += chunk.text;
       }
       if (chunk.type === "finish") {
@@ -143,10 +169,22 @@ export async function reviewCandidatesWithDshModel(
         }
       }
     }
+  })();
+  consumeStream.catch(() => {});
+  try {
+    await Promise.race([consumeStream, timeoutPromise]);
   } finally {
-    clearTimeout(timeout);
+    settled = true;
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
+    controller.abort(new Error("review finished"));
     request.signal.removeEventListener("abort", relayAbort);
+    // Closing the iterator ends the host stream instead of leaving it running
+    // after the race settled; without this the loser keeps pulling chunks.
+    void Promise.resolve(iterator.return?.()).catch(() => {});
   }
+
 
   const parsed = extractJson(text) as {
     scores?: unknown;

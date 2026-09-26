@@ -2,7 +2,7 @@
 // writeFakeDsh in core.integration.test.ts) invokes this helper with the path
 // to a JSON spec file; the spec's `mode` selects the behavior that the
 // POSIX-only shell scripts used to encode.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const [specPath] = process.argv.slice(2);
@@ -83,6 +83,36 @@ switch (spec.mode) {
   case "winner": {
     if (candidateBasename === "candidate-1") {
       writeFileSync("result.txt", "winner\n");
+      process.exit(0);
+    }
+    process.exit(2);
+    break;
+  }
+  case "modify-and-add": {
+    if (candidateBasename === "candidate-1") {
+      writeFileSync("README.md", "fixture\nwinner edit\n");
+      writeFileSync("added-by-winner.txt", "added\n");
+      process.exit(0);
+    }
+    process.exit(2);
+    break;
+  }
+  // A rename: Git pairs the deleted tracked file with the new untracked one, so
+  // the change set has two paths and rollback has to know both.
+  case "rename": {
+    if (candidateBasename === "candidate-1") {
+      writeFileSync("renamed-victim.txt", readFileSync("victim.txt"));
+      rmSync("victim.txt");
+      process.exit(0);
+    }
+    process.exit(2);
+    break;
+  }
+  // One line appended to the end of a long file, so the hunk leaves most of the
+  // file outside its context.
+  case "long-file": {
+    if (candidateBasename === "candidate-1") {
+      writeFileSync("notes.md", `${readFileSync("notes.md", "utf8")}winner-line\n`);
       process.exit(0);
     }
     process.exit(2);

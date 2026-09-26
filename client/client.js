@@ -73,9 +73,9 @@ window.__ModuleLoader__.load({ id: "dsh-llm-verifier", factory: (require) => {
 	function msToMinutes(ms) {
 		return Math.round((Number(ms) || 0) / 60000);
 	}
-	function minutesToMs(minutes) {
-		return Math.max(1, Math.round(Number(minutes) || 0)) * 60000;
-	}
+	// Same ceiling as MAX_TIMEOUT_MS in the settings schema and MAX_TIMEOUT_MIN in the portable
+	// engine: 7 days. A minute box without it let the UI offer a value every backend refuses.
+	const MAX_TIMEOUT_MINUTES = 10_080;
 	function collapsedSummary(v) {
 		if (!v) return "";
 		const mode = { parent_agent: "当前主代理评审", dsh_model: "DSH 模型评审", deepseek_verifier: "DeepSeek Verifier" }[v.reviewMode] || v.reviewMode;
@@ -95,10 +95,12 @@ window.__ModuleLoader__.load({ id: "dsh-llm-verifier", factory: (require) => {
 		);
 	}
 
-	const pendingWrites = {};
-	function debouncedSet(scope, field, value, delay) {
-		clearTimeout(pendingWrites[field]);
-		pendingWrites[field] = setTimeout(() => { void scope.set(field, value); }, delay ?? 300);
+	function debouncedSet(pending, scope, field, value, onError, delay) {
+		onError(null);
+		clearTimeout(pending[field]);
+		pending[field] = setTimeout(() => {
+			scope.set(field, value).catch((cause) => onError(cause instanceof Error ? cause.message : String(cause)));
+		}, delay ?? 300);
 	}
 
 	function SettingsCard({ scope }) {
@@ -107,6 +109,14 @@ window.__ModuleLoader__.load({ id: "dsh-llm-verifier", factory: (require) => {
 		react.useEffect(() => scope.subscribe(() => setSnap(scope.getSnapshot())), [scope]);
 		const [error, setError] = react.useState(null);
 		const [checkResult, setCheckResult] = react.useState(null);
+		// Per-instance: two cards can be mounted at once and share no writes.
+		const pending = react.useRef({}).current;
+		// Keyed on `scope`, not `pending`: debouncedSet closes over the scope it was handed, so a
+		// pending timer surviving a scope swap writes the OLD namespace document — and the sibling
+		// effect above already declares that a new scope object is expected ([scope]).
+		react.useEffect(() => () => {
+			for (const timer of Object.values(pending)) clearTimeout(timer);
+		}, [scope]);
 		const set = async (field, value) => {
 			try {
 				setError(null);
@@ -129,8 +139,14 @@ window.__ModuleLoader__.load({ id: "dsh-llm-verifier", factory: (require) => {
 		const numberInput = (key, min, max, step) => react.createElement("input", {
 			type: "number", min, max, step: step ?? 1, value: v[key], style: styles.number,
 			onChange: (event) => {
-				const parsed = Number(event.target.value);
-				if (Number.isFinite(parsed) && parsed >= min && parsed <= max) debouncedSet(scope, key, parsed);
+				const raw = event.target.value;
+				if (raw === "") return;
+				const parsed = Number(raw);
+				// Integrality is part of the domain, not decoration: every field below is a
+				// z.natural() in settings.ts, so a pasted 3.5 used to pass the UI check and die in
+				// the schema — the edit vanished behind an error that never named the fraction.
+				if (Number.isInteger(parsed) && parsed >= min && (max === undefined || parsed <= max)) debouncedSet(pending, scope, key, parsed, setError);
+				else setError(key + " 必须是 " + (max === undefined ? "不小于 " + min : min + "-" + max) + " 范围内的整数。");
 			}
 		});
 		const select = (key, options) => react.createElement(
@@ -146,13 +162,32 @@ window.__ModuleLoader__.load({ id: "dsh-llm-verifier", factory: (require) => {
 		);
 		const textField = (key, labelText, placeholder) => row(key, labelText, react.createElement("input", {
 			type: "text", value: String(v[key] ?? ""), placeholder, style: styles.text,
-			onChange: (event) => void set(key, event.target.value)
+			onChange: (event) => debouncedSet(pending, scope, key, event.target.value, setError)
 		}));
 		const minutesField = (key, labelText, minMinutes) => row(key, labelText + "（分钟）", react.createElement("input", {
-			type: "number", min: minMinutes, step: 1, value: msToMinutes(v[key]), style: styles.number,
+			type: "number", min: minMinutes, max: MAX_TIMEOUT_MINUTES, step: 1, value: msToMinutes(v[key]), style: styles.number,
 			onChange: (event) => {
-				if (event.target.value === "") return;
-				void set(key, minutesToMs(event.target.value));
+				// The KiB field's twin, and it had both of the bugs that were fixed there: no upper
+				// bound (the schema ceiling is MAX_TIMEOUT_MS, so 99999 minutes was accepted here and
+				// refused on save), and the old `Math.max(1, round(Number(m) || 0))` coercion turned
+				// garbage, 0 and negatives into 60000 ms without saying so.
+				const raw = event.target.value;
+				if (raw === "") return;
+				const parsed = Number(raw);
+				if (Number.isInteger(parsed) && parsed >= minMinutes && parsed <= MAX_TIMEOUT_MINUTES) debouncedSet(pending, scope, key, parsed * 60000, setError);
+				else setError(key + " 必须是 " + minMinutes + "-" + MAX_TIMEOUT_MINUTES + " 范围内的整数分钟。");
+			}
+		}));
+		// Stored as bytes but shown in KiB, matching the label; editing the raw
+		// byte count in a 1-2048 box silently clamped the default 524288 to 2048.
+		const kibField = (key, labelText, maxKib) => row(key, labelText + "（KiB）", react.createElement("input", {
+			type: "number", min: 1, max: maxKib, step: 1, value: Math.round(Number(v[key]) / 1024), style: styles.number,
+			onChange: (event) => {
+				const raw = event.target.value;
+				if (raw === "") return;
+				const parsed = Number(raw);
+				if (Number.isFinite(parsed) && parsed >= 1 && parsed <= maxKib) debouncedSet(pending, scope, key, parsed * 1024, setError);
+				else setError(key + " 必须是 1-" + maxKib + " 范围内的数字。");
 			}
 		}));
 
@@ -226,7 +261,10 @@ window.__ModuleLoader__.load({ id: "dsh-llm-verifier", factory: (require) => {
 					row("nEvaluations", "每项重复评估次数", numberInput("nEvaluations", 1, 4)),
 					row("maxVerifierWorkers", "比较请求并发", numberInput("maxVerifierWorkers", 1, 16)),
 					row("verifierEffort", "比较推理强度", select("verifierEffort", EFFORTS)),
-					row("verifierMaxTokens", "Verifier 输出预算", numberInput("verifierMaxTokens", 1024, 131072, 1024))
+					// No upper bound here on purpose: settings.ts declares `z.natural().min(1)` with no max, and a
+			// card that is stricter than the schema can display a value (written by config.json or the TS
+			// layer) that it then refuses to re-save. A real ceiling belongs in the schema, so every path shares it.
+			row("verifierMaxTokens", "Verifier 输出预算", numberInput("verifierMaxTokens", 1, undefined, 1024))
 				] : [],
 				row("reviewSingleEligible", "单一合格答案仍需评审", react.createElement("input", {
 					type: "checkbox", checked: v.reviewSingleEligible === true,
@@ -250,7 +288,7 @@ window.__ModuleLoader__.load({ id: "dsh-llm-verifier", factory: (require) => {
 					value: Array.isArray(v.validationCommands) ? v.validationCommands.join("\n") : "",
 					onChange: (event) => {
 						const commands = event.target.value.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
-						debouncedSet(scope, "validationCommands", commands, 500);
+						debouncedSet(pending, scope, "validationCommands", commands, setError, 500);
 					}
 				})),
 				minutesField("candidateTimeoutMs", "单候选时限", 1),
@@ -260,7 +298,7 @@ window.__ModuleLoader__.load({ id: "dsh-llm-verifier", factory: (require) => {
 
 			react.createElement(Group, { key: "adv", title: "高级", defaultOpen: false },
 			react.createElement("div", null,
-				row("maxVerifierTraceBytes", "评审轨迹上限 (KiB)", numberInput("maxVerifierTraceBytes", 1, 2048, 1)),
+				kibField("maxVerifierTraceBytes", "评审轨迹上限", 8192),
 				textField("stateDirectory", "产物目录", "$DSH_HOME/llm-verifier")
 			)),
 

@@ -1,5 +1,12 @@
 export type CandidateCount = 1 | 2 | 3 | 4 | 5;
 
+/**
+ * Ceiling for every timeout this plugin feeds to `setTimeout`. Node clamps a delay above
+ * 2^31-1 ms down to 1 ms (warning only), so an unbounded config value aborts the run it was
+ * meant to allow. 7 days is also what the portable engine enforces (MAX_TIMEOUT_MIN 10_080).
+ */
+export const MAX_TIMEOUT_MS = 604_800_000;
+
 export interface RuntimeConfig {
   readonly candidateProfile: string;
   readonly credentialRef: string;

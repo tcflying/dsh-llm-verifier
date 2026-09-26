@@ -5,8 +5,9 @@
       "type": "stdio",
       "command": "node",
       "args": [
-        "C:/Users/datoo/.minimax/plugins/llm-verifier/.minimax-plugin/mcp-server.mjs"
+        ".minimax-plugin/mcp-server.mjs"
       ],
+      "cwd": "${PLUGIN_ROOT}",
       "timeout": 3600000
     }
   }

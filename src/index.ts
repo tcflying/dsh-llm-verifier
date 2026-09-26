@@ -6,15 +6,16 @@ import z from "@deepseek-ai/schemastery";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { CandidateCount, RuntimeConfig } from "./config.ts";
+import { MAX_TIMEOUT_MS, type CandidateCount, type RuntimeConfig } from "./config.ts";
 import {
   applyVerifiedWinner,
   rollbackVerifiedWinner,
   runVerifiedBestOf,
   selectVerifiedCandidate,
 } from "./core.ts";
-import { registerVerifierSettings, resolveRunSettings, settingsBaseFrom } from "./settings.ts";
+import { registerVerifierSettings, resolveRunSettings, settingsBaseFrom, expandStateDirectory } from "./settings.ts";
 import { reviewCandidatesWithDshModel, type LlmRuntimeLike } from "./reviewer.ts";
+
 import type { ReviewWithModelRequest } from "./contracts.ts";
 import { runPythonVerifier } from "./verifier.ts";
 
@@ -51,22 +52,12 @@ export const Config = z.object({
     z.const("max"),
   ]).default("high"),
   verifierMaxTokens: z.natural().min(1).default(32_768),
-  candidateTimeoutMs: z.natural().min(1).default(20 * 60 * 1_000),
-  validationTimeoutMs: z.natural().min(1).default(10 * 60 * 1_000),
-  runTimeoutMs: z.natural().min(1).default(45 * 60 * 1_000),
+  candidateTimeoutMs: z.natural().min(1).max(MAX_TIMEOUT_MS).default(20 * 60 * 1_000),
+  validationTimeoutMs: z.natural().min(1).max(MAX_TIMEOUT_MS).default(10 * 60 * 1_000),
+  runTimeoutMs: z.natural().min(1).max(MAX_TIMEOUT_MS).default(45 * 60 * 1_000),
   maxVerifierTraceBytes: z.natural().min(1).default(512 * 1_024),
   stateDirectory: z.string().default("$DSH_HOME/llm-verifier"),
 });
-
-function expandStateDirectory(configuredStateDirectory: string, dshHomeDirectory: string): string {
-  if (configuredStateDirectory === "$DSH_HOME") {
-    return dshHomeDirectory;
-  }
-  if (configuredStateDirectory.startsWith("$DSH_HOME/")) {
-    return join(dshHomeDirectory, configuredStateDirectory.slice("$DSH_HOME/".length));
-  }
-  return configuredStateDirectory;
-}
 
 function resolvePluginConfig(config: Config): {
   readonly defaultCandidateCount: CandidateCount;
@@ -155,7 +146,7 @@ const verifiedBestOfOutputSchema = {
     },
     selectionMethod: {
       oneOf: [
-        { type: "string", enum: ["llm_verifier", "validation_only", "parent_agent_review", "dsh_model"] },
+        { type: "string", enum: ["llm_verifier", "validation_only", "dsh_model"] },
         { type: "null" },
       ],
       required: true,
@@ -238,6 +229,18 @@ const applyWinnerOutputSchema = {
 function requireAllowedApproval(outcome: ApprovalOutcome, toolName: string): void {
   if (outcome !== "allowed-once") {
     throw new Error(`${toolName} approval was not granted: ${outcome}`);
+  }
+}
+
+/**
+ * The `enabled` kill switch gates every tool that changes anything, not just the
+ * run: stored as false it has to stop an apply, a rollback and a recorded
+ * selection too. Apply re-reads it inside its critical section as well, because
+ * the approval wait between this check and the mutation takes minutes.
+ */
+function requireEnabled(runSettings: { enabled: boolean }, toolName: string): void {
+  if (!runSettings.enabled) {
+    throw new Error(`${toolName} is disabled by the llm-verifier settings (enabled: false)`);
   }
 }
 
@@ -329,9 +332,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         throw new Error("verified_best_of requires a calling agent with a session cwd");
       }
       const { section: runSettings, settingsRevision } = resolveRunSettings(fallbackRunSettings);
-      if (!runSettings.enabled) {
-        throw new Error("verified_best_of is disabled by the llm-verifier settings (enabled: false)");
-      }
+      requireEnabled(runSettings, "verified_best_of");
       let operationCredential: string | undefined;
       return runVerifiedBestOf(
         {
@@ -425,13 +426,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     timeoutMs: 30 * 60_000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
+      const rollbackSettings = resolveRunSettings(fallbackRunSettings).section;
+      requireEnabled(rollbackSettings, "rollback_verified_winner");
       const repositoryPath = exec.agent?.session.header.cwd;
       if (repositoryPath === undefined) {
         throw new Error("rollback_verified_winner requires a calling agent with a session cwd");
       }
       return rollbackVerifiedWinner(
         { runId: args.runId, repositoryPath, signal: exec.signal },
-        resolveRunSettings(fallbackRunSettings).section,
+        rollbackSettings,
       );
     },
   }));
@@ -469,6 +472,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     timeoutMs: 5 * 60_000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
+      const selectionSettings = resolveRunSettings(fallbackRunSettings).section;
+      requireEnabled(selectionSettings, "select_verified_candidate");
       const repositoryPath = exec.agent?.session.header.cwd;
       if (repositoryPath === undefined) {
         throw new Error("select_verified_candidate requires a calling agent with a session cwd");
@@ -481,7 +486,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           reason: args.reason,
           ...(exec.agent?.session.id === undefined ? {} : { sessionId: exec.agent.session.id }),
         },
-        resolveRunSettings(fallbackRunSettings).section,
+        selectionSettings,
       );
     },
   }));
@@ -514,13 +519,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     timeoutMs: 100 * 60_000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
+      const applySettings = resolveRunSettings(fallbackRunSettings).section;
+      requireEnabled(applySettings, "apply_verified_winner");
       const repositoryPath = exec.agent?.session.header.cwd;
       if (repositoryPath === undefined) {
         throw new Error("apply_verified_winner requires a calling agent with a session cwd");
       }
       return applyVerifiedWinner(
         { runId: args.runId, repositoryPath, signal: exec.signal, ...(args.candidateId !== undefined ? { candidateId: args.candidateId } : {}) },
-        resolveRunSettings(fallbackRunSettings).section,
+        applySettings,
         {
           requestApproval: async (reason, signal) => {
             const agent = exec.agent;
@@ -546,6 +553,9 @@ export function apply(ctx: Context, config: Config = {}): void {
             // there is nothing to redact.
             return resolvedCredential?.value ?? "";
           },
+          // Live re-read: `applies: "live"`, so a settings change during the
+          // approval wait reaches the mutation guard inside the repository lock.
+          isDisabled: () => !resolveRunSettings(fallbackRunSettings).section.enabled,
         },
       );
     },

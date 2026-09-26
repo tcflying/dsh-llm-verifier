@@ -49,7 +49,16 @@ function packageManagerFromDeclaration(packageManager: unknown): JavaScriptPacka
   );
 }
 
-async function detectJavaScriptCommand(repositoryPath: string): Promise<string> {
+export interface ResolvedValidationCommands {
+  /** Commands rerun in the user's own repository after an apply. */
+  readonly commands: string[];
+  /** Commands run once per candidate worktree before `commands`. A fresh
+   * worktree is a bare checkout with no installed dependencies, so the install
+   * belongs there and not in the repository the winner is applied to. */
+  readonly setupCommands: string[];
+}
+
+async function detectJavaScriptCommand(repositoryPath: string): Promise<ResolvedValidationCommands> {
   const packageJsonPath = join(repositoryPath, "package.json");
   const packageJsonValue: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
   if (packageJsonValue === null || typeof packageJsonValue !== "object" || Array.isArray(packageJsonValue)) {
@@ -99,15 +108,31 @@ async function detectJavaScriptCommand(repositoryPath: string): Promise<string> 
       `cannot auto-detect validation commands: package.json declares no supported packageManager and has no recognized lockfile at ${repositoryPath}`,
     );
   }
-  return `${managerName} test`;
+  // Candidates run in a fresh worktree that has no installed dependencies, so a
+  // bare `<manager> test` fails for every candidate and the run reports
+  // `no_winner` for what is really a missing install. Installing from the
+  // lockfile first makes the worktree check self-contained. The install is
+  // carried apart from the test command because the post-apply revalidation runs
+  // in the user's repository, where `npm ci` would wipe their own node_modules,
+  // may rewrite their lockfile, needs network, and is never undone by a
+  // rollback. The patch is captured before validation either way, so an install
+  // rewriting the lockfile cannot change what gets applied.
+  // ponytail: validationTimeoutMs has to cover the install; raise it for a tree
+  // whose dependency fetch is slower than the default budget.
+  const lockfileName = foundLockfiles[0]?.[0];
+  const install = managerName === "npm"
+    ? (lockfileName === undefined ? "npm install" : "npm ci")
+    : `${managerName} install --frozen-lockfile`;
+  return { commands: [`${managerName} test`], setupCommands: [install] };
 }
 
 export async function resolveValidationCommands(
   repositoryPath: string,
   explicitValidationCommands?: readonly string[],
-): Promise<string[]> {
+): Promise<ResolvedValidationCommands> {
   if (explicitValidationCommands !== undefined) {
-    return validateExplicitCommands(explicitValidationCommands);
+    // What the caller named is what runs, in the worktree and after the apply.
+    return { commands: validateExplicitCommands(explicitValidationCommands), setupCommands: [] };
   }
 
   const projectMarkers: ReadonlyArray<readonly [string, string]> = [
@@ -139,17 +164,20 @@ export async function resolveValidationCommands(
   }
 
   const matchedProjectType = matchedMarkers[0]?.[1];
+  // No setup step for the other project types: `uv run`, `cargo test` and
+  // `go test` resolve their own dependencies as part of the test command.
+  const plain = (command: string): ResolvedValidationCommands => ({ commands: [command], setupCommands: [] });
   switch (matchedProjectType) {
     case "javascript":
-      return [await detectJavaScriptCommand(repositoryPath)];
+      return await detectJavaScriptCommand(repositoryPath);
     case "python":
-      return ["uv run pytest"];
+      return plain("uv run pytest");
     case "rust":
-      return ["cargo test"];
+      return plain("cargo test");
     case "go":
-      return ["go test ./..."];
+      return plain("go test ./...");
     case "make":
-      return ["make test"];
+      return plain("make test");
     default:
       throw new Error(`cannot auto-detect validation commands: unknown project type ${JSON.stringify(matchedProjectType)}`);
   }
