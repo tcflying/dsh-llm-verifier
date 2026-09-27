@@ -10,6 +10,24 @@ import type { BinaryFileSummary } from "./contracts.ts";
 const execFileAsync = promisify(execFile);
 const MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024;
 
+/**
+ * Per-spawn ceiling for every git call below. `execFile` carries no default
+ * timeout, so a git that stops answering — an index locked by a concurrent
+ * process, a stalled remote, a credential prompt waiting on a TTY that does not
+ * exist here — used to hang the step forever instead of failing it. Only one of
+ * the call sites threads an `AbortSignal` through, and rollback's destructive
+ * `checkout` / `reset` are not that one, so the ceiling is the only thing every
+ * path shares.
+ *
+ * The portable engine already bounds every spawn at the same ten minutes
+ * (`GIT_TIMEOUT_MS` in mcp-server.mjs, operator-overridable via
+ * `LLM_VERIFIER_GIT_TIMEOUT_MS`), so this matches it rather than inventing a
+ * second number for the TS layer to disagree about. A caller that knows the
+ * run's remaining budget may pass a smaller `timeoutMs`; the default covers
+ * every path that does not.
+ */
+const DEFAULT_GIT_TIMEOUT_MS = 10 * 60 * 1_000;
+
 export interface RepositorySnapshot {
   readonly repositoryPath: string;
   readonly baseCommit: string;
@@ -107,19 +125,28 @@ async function runGitRaw(
   repositoryPath: string,
   arguments_: readonly string[],
   signal?: AbortSignal,
+  timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS,
 ): Promise<Buffer> {
   try {
     const { stdout } = await execFileAsync("git", [...arguments_], {
       cwd: repositoryPath,
       encoding: "buffer",
       maxBuffer: MAX_GIT_OUTPUT_BYTES,
+      timeout: timeoutMs,
       ...(signal === undefined ? {} : { signal }),
     });
     return stdout;
   } catch (error) {
-    const processError = error as NodeJS.ErrnoException & { stderr?: string };
+    const processError = error as NodeJS.ErrnoException & { stderr?: string; killed?: boolean };
     const stderr = typeof processError.stderr === "string" ? processError.stderr.trim() : "";
-    const detail = stderr.length === 0 ? processError.message : stderr;
+    // A spawn this killed did not fail, it never finished — and the two must not
+    // read identically to whoever adjudicates the step. On the timeout path
+    // `execFile` sets `killed` and leaves stderr empty, so without this branch a
+    // hung git reports the same sentence as a rejecting one and the run's own
+    // timeout is mistaken for git's opinion.
+    const detail = processError.killed === true && stderr.length === 0
+      ? `timed out after ${timeoutMs} ms`
+      : stderr.length === 0 ? processError.message : stderr;
     throw new Error(
       `git ${arguments_[0] ?? "command"} failed in ${repositoryPath}: ${detail}`,
       { cause: error },
@@ -131,8 +158,11 @@ export async function runGit(
   repositoryPath: string,
   arguments_: readonly string[],
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<string> {
-  return (await runGitRaw(repositoryPath, arguments_, signal)).toString("utf8");
+  // `undefined` falls through to the default parameter, so the 26 call sites
+  // that pass no ceiling are unchanged in behaviour and now share one.
+  return (await runGitRaw(repositoryPath, arguments_, signal, timeoutMs)).toString("utf8");
 }
 
 /**
@@ -144,8 +174,9 @@ export async function runGitBytes(
   repositoryPath: string,
   arguments_: readonly string[],
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<Buffer> {
-  return runGitRaw(repositoryPath, arguments_, signal);
+  return runGitRaw(repositoryPath, arguments_, signal, timeoutMs);
 }
 
 async function readOptionalGitConfig(
