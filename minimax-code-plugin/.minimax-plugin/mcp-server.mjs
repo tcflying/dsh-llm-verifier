@@ -430,8 +430,18 @@ const TOOLS = [
   {
     name: "apply_verified_winner",
     title: "Apply the winning patch to the repository",
-    description: "Apply the selected candidate's diff to the origin repository, then rerun the stored validation command. Refuses unless status is winner_selected.",
-    inputSchema: { type: "object", required: ["runId"], properties: { runId: { type: "string" } } },
+    description:
+      "Two-step by design: a call without confirm runs every pre-flight guard (patch hash, HEAD, dirty tree, apply --check) " +
+      "and returns an approval preview; call again with confirm:true to actually mutate the repository, then the stored " +
+      "validation command is rerun. Refuses unless status is winner_selected.",
+    inputSchema: {
+      type: "object",
+      required: ["runId"],
+      properties: {
+        runId: { type: "string" },
+        confirm: { type: "boolean", description: "Omit on the first call to get the approval preview; pass true to apply the patch for real." },
+      },
+    },
   },
   {
     name: "rollback_verified_winner",
@@ -1447,7 +1457,7 @@ function parseNumstatZ(out) {
 // rollback decision: a manifest whose post-apply rewrite never landed still names one of these.
 const APPLY_ACCEPTS = ["winner_selected", "rolled_back"];
 
-async function applyVerifiedWinner({ runId }, signal) {
+async function applyVerifiedWinner({ runId, confirm }, signal) {
   const run = loadRun(runId);
   if (!APPLY_ACCEPTS.includes(run.status))
     throw new Error(`run ${runId} status is ${run.status}, expected ${APPLY_ACCEPTS.join(" or ")} (rolled_back = re-apply)`);
@@ -1493,6 +1503,17 @@ async function applyVerifiedWinner({ runId }, signal) {
   const check = git(run.repoPath, ["apply", "--check", "--whitespace=nowarn", cand.patchPath]);
   if (check.status !== 0)
     throw new Error(`patch does not apply cleanly to the repository:\n${tail(gitWhy(check), 800)}`);
+  // Approval door (928 P0-2): this server has no host callback channel, so approval IS the second
+  // call. The preview is returned only after every pre-flight guard above passed — which is exactly
+  // what the caller is approving when it re-calls with confirm:true. A one-way mutation with no
+  // confirm used to be the engine's biggest gap versus the TS layer's requestApproval door.
+  if (confirm !== true)
+    return {
+      status: "approval_required", runId, winnerId: run.winnerId,
+      patchPath: cand.patchPath, patchSha256: cand.patchSha256 || null,
+      baseCommit: run.baseCommit || null, repositoryPath: run.repoPath,
+      nextStep: `call apply_verified_winner {runId:"${runId}", confirm:true} to apply the patch`,
+    };
   // Last safe point: after this the working tree is already modified.
   if (signal?.aborted) throw new Error(`apply of run ${runId} cancelled before the patch was applied; repository untouched`);
   // The rollback handle goes down BEFORE the tree is touched (TS does the same, src/core.ts
@@ -1736,6 +1757,26 @@ function rollbackVerifiedWinner({ runId }) {
       "Resolve local edits first, or reverse the patch manually:\n" + tail(gitWhy(check), 800));
   const r = git(repoPath, ["apply", "-R", "--whitespace=nowarn", patchPath]);
   if (r.status !== 0) throw new Error(`reverse apply failed:\n${tail(gitWhy(r), 800)}`);
+  // The reverse patch restores content, but a staged or intent-to-add entry survives in the index
+  // as `AD <path>` — the index still claims the patch is staged. Apply requires a clean index, so
+  // the next apply on this tree would refuse on THIS rollback's leftovers (the trap 928 C-station
+  // named: rollback "succeeds", the tree is content-correct, and the run is wedged anyway).
+  // Unstage the touched paths back to HEAD (TS twin: core.ts's post-restore reset loop). Literal
+  // pathspecs because a recorded `dir/[x].file` is a glob to git otherwise. Disclosed, not fatal:
+  // the content is already back, and a wedged index has a one-command manual exit.
+  const resetScope = [...new Set([
+    ...(Array.isArray(run?.appliedFiles) ? run.appliedFiles : []),
+    ...(patchTouchedFiles(patchPath) ?? []),
+  ])];
+  const resetFailures = [];
+  for (let off = 0; off < resetScope.length; off += 100) {
+    const batch = resetScope.slice(off, off + 100).map((p) => `:(top,literal)${p}`);
+    const reset = git(repoPath, ["reset", "--quiet", "--", ...batch]);
+    if (reset.status !== 0) resetFailures.push(tail(gitWhy(reset), 200));
+  }
+  const resetNote = resetFailures.length
+    ? `unstaging the rolled-back paths failed (${resetFailures.join("; ")}); the index may still carry the patch — run git reset -- <paths> yourself if the next apply refuses on a dirty index`
+    : null;
   // `git apply` writes blob bytes. In a repo that normalises line endings (core.autocrlf is a Windows
   // default) the smudged form is what git expects on disk, so a perfectly successful reverse apply can
   // still leave " M <path>" behind while the content is the pre-patch text. Saying rolled_back over that
@@ -1762,14 +1803,18 @@ function rollbackVerifiedWinner({ runId }) {
   if (stateError && run) disclose(run, "apply-state unreadable, rollback authorized by the manifest alone", stateError);
   if (!run) {
     // No manifest to carry anything, so the response is the only channel left. `stateError` cannot
-    // be set on this branch (no run and no readable state throws above), so the two notes here are
-    // the dirty tree and the leftover handle.
-    const notes = [postRollbackNote, leftoverNote].filter((note) => note !== null);
+    // be set on this branch (no run and no readable state throws above), so the notes here are the
+    // dirty tree, the unstage failures and the leftover handle.
+    const notes = [postRollbackNote, resetNote, leftoverNote].filter((note) => note !== null);
     return notes.length ? { status: "rolled_back", runId, internalErrors: notes } : { status: "rolled_back", runId };
   }
   if (postRollbackNote) {
     const errs = (run.internalErrors ??= []);
     if (!errs.includes(postRollbackNote)) errs.push(postRollbackNote);
+  }
+  if (resetNote) {
+    const errs = (run.internalErrors ??= []);
+    if (!errs.includes(resetNote)) errs.push(resetNote);
   }
   run.status = "rolled_back";
   run.rolledBackAt = nowIso();

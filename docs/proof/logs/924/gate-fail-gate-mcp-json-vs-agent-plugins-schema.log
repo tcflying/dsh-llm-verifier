@@ -1,0 +1,19 @@
+$ node G:/zcode-project/llm-verify/dsh-llm-verifier/docs/proof/tools/mcp-config-924.mjs
+exit=1
+--- stdout+stderr ---
+ok  plugin   keys=type,command,args,cwd,timeout args=[".minimax-plugin/mcp-server.mjs"] cwd=${PLUGIN_ROOT}
+ok  plugin/artifact -> G:/zcode-project/llm-verify/dsh-llm-verifier/minimax-code-plugin/.minimax-plugin/mcp-server.mjs engine=f1aadaa4a146
+BAD installed1    -> C:/Users/datoo/.minimax/plugins/llm-verifier/.minimax-plugin/mcp-server.mjs engine=68e3b12a7f36
+BAD installed2    -> C:/Users/datoo/.minimax/plugins/llm-verifier/.minimax-plugin/mcp-server.mjs engine=68e3b12a7f36
+BAD minimax       -> C:/Users/datoo/.minimax/plugins/llm-verifier/.minimax-plugin/mcp-server.mjs engine=68e3b12a7f36
+BAD zcode         -> C:/Users/datoo/.zcode/skills/llm-verifier/mcp-server.mjs engine=68e3b12a7f36
+BAD jcode         -> C:/Users/datoo/.zcode/skills/llm-verifier/mcp-server.mjs engine=68e3b12a7f36
+n/a qoder-cn  no registration file (SKILL.md-only install; tracked separately)
+n/a qoder     no registration file (SKILL.md-only install; tracked separately)
+
+MCP CONFIG FAILURES:
+ - installed1: loaded engine C:/Users/datoo/.minimax/plugins/llm-verifier/.minimax-plugin/mcp-server.mjs is 68e3b12a7f36, repo G:/zcode-project/llm-verify/dsh-llm-verifier/minimax-code-plugin/.minimax-plugin/mcp-server.mjs is f1aadaa4a146 — run sync-deployed-924.mjs --write
+ - installed2: loaded engine C:/Users/datoo/.minimax/plugins/llm-verifier/.minimax-plugin/mcp-server.mjs is 68e3b12a7f36, repo G:/zcode-project/llm-verify/dsh-llm-verifier/minimax-code-plugin/.minimax-plugin/mcp-server.mjs is f1aadaa4a146 — run sync-deployed-924.mjs --write
+ - minimax: loaded engine C:/Users/datoo/.minimax/plugins/llm-verifier/.minimax-plugin/mcp-server.mjs is 68e3b12a7f36, repo G:/zcode-project/llm-verify/dsh-llm-verifier/minimax-code-plugin/.minimax-plugin/mcp-server.mjs is f1aadaa4a146 — run sync-deployed-924.mjs --write
+ - zcode: loaded engine C:/Users/datoo/.zcode/skills/llm-verifier/mcp-server.mjs is 68e3b12a7f36, repo G:/zcode-project/llm-verify/dsh-llm-verifier/minimax-code-plugin/.minimax-plugin/mcp-server.mjs is f1aadaa4a146 — run sync-deployed-924.mjs --write
+ - jcode: loaded engine C:/Users/datoo/.zcode/skills/llm-verifier/mcp-server.mjs is 68e3b12a7f36, repo G:/zcode-project/llm-verify/dsh-llm-verifier/minimax-code-plugin/.minimax-plugin/mcp-server.mjs is f1aadaa4a146 — run sync-deployed-924.mjs --write

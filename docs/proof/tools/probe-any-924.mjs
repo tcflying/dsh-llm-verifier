@@ -107,7 +107,10 @@ const textOf = (m) => (m?.result?.content?.[0]?.text ?? m?.error?.message ?? JSO
   await s.rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {} });
   for (const bad of ["../../evil", "a/../../b", "..\\..\\evil", ""]) {
     const m = await s.rpc("tools/call", { name: "select_verified_candidate", arguments: { runId: bad, candidateId: "candidate-1", reason: "x" } });
-    check(`E6 runId ${JSON.stringify(bad)} refused`, m.result?.isError === true || !!m.error, textOf(m));
+    // isError alone proved too weak (928 P1-1): deleting the engine's assertRunId left E6 green
+    // while the traversal really happened — any earlier validation on the same call satisfies it.
+    // The refusal only counts when it names the engine's own runId-format rejection.
+    refused(m, /invalid runId/, `E6 runId ${JSON.stringify(bad)} refused`);
   }
   s.close();
 }

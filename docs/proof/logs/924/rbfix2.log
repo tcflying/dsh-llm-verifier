@@ -1,0 +1,376 @@
+[llm-verifier] 2026-09-25T20:11:24.833Z run bc432500-a466-416a-99e8-47ef4262abd6 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:11:24.834Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:11:24.879Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:11:24.923Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:11:24.967Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:11:24.967Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:11:24.967Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:11:24.968Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:11:26.118Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-add-S5Sx4U\state\runs\bc432500-a466-416a-99e8-47ef4262abd6\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:11:26.182Z candidate candidate-1: completed/passed (266ms)
+[llm-verifier] 2026-09-25T20:11:26.182Z candidate candidate-2: failed/not_run (124ms)
+[llm-verifier] 2026-09-25T20:11:26.182Z candidate candidate-3: failed/not_run (123ms)
+[llm-verifier] 2026-09-25T20:11:26.183Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:11:26.184Z run bc432500-a466-416a-99e8-47ef4262abd6 complete: status=winner_selected, winner=candidate-1
+▶ rollback of an applied winner
+  ✔ restores the tree when the winner patch adds a new file (3132.1538ms)
+[llm-verifier] 2026-09-25T20:11:28.231Z run c7d66a56-d044-4659-88f3-e0c12ca40935 starting: 3 candidates, validation: if not exist added-by-winner.txt exit 1
+[llm-verifier] 2026-09-25T20:11:28.233Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:11:28.441Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:11:28.719Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:11:28.772Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:11:28.772Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:11:28.772Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:11:28.772Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:11:30.182Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-mixed-ECnMqX\state\runs\c7d66a56-d044-4659-88f3-e0c12ca40935\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:11:30.300Z candidate candidate-1: completed/passed (559ms)
+[llm-verifier] 2026-09-25T20:11:30.300Z candidate candidate-2: failed/not_run (141ms)
+[llm-verifier] 2026-09-25T20:11:30.300Z candidate candidate-3: failed/not_run (135ms)
+[llm-verifier] 2026-09-25T20:11:30.300Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:11:30.302Z run c7d66a56-d044-4659-88f3-e0c12ca40935 complete: status=winner_selected, winner=candidate-1
+  ✔ reverts a modified HEAD-known file and deletes an added file in one patch (4772.1427ms)
+[llm-verifier] 2026-09-25T20:11:33.139Z run 44d64593-73e0-408a-92ed-77eb9fa13741 starting: 3 candidates, validation: if not exist renamed-victim.txt exit 1
+[llm-verifier] 2026-09-25T20:11:33.141Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:11:33.319Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:11:33.440Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:11:33.661Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:11:33.661Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:11:33.661Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:11:33.662Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:11:35.598Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-rename-IvwiFq\state\runs\44d64593-73e0-408a-92ed-77eb9fa13741\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:11:36.126Z candidate candidate-1: completed/passed (1310ms)
+[llm-verifier] 2026-09-25T20:11:36.126Z candidate candidate-2: failed/not_run (312ms)
+[llm-verifier] 2026-09-25T20:11:36.126Z candidate candidate-3: failed/not_run (313ms)
+[llm-verifier] 2026-09-25T20:11:36.126Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:11:36.128Z run 44d64593-73e0-408a-92ed-77eb9fa13741 complete: status=winner_selected, winner=candidate-1
+  ✔ restores both sides of a rename and leaves the tree identical to HEAD (9020.3904ms)
+[llm-verifier] 2026-09-25T20:11:42.070Z run 1e4b6c0c-12b2-491f-ab61-f5a9667ec85d starting: 3 candidates, validation: if not exist added-by-winner.txt exit 1
+[llm-verifier] 2026-09-25T20:11:42.112Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:11:42.353Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:11:42.431Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:11:42.552Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:11:42.552Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:11:42.552Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:11:42.552Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:12:36.378Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-interrupt-edit-7p7wRK\state\runs\1e4b6c0c-12b2-491f-ab61-f5a9667ec85d\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:12:36.791Z candidate candidate-1: completed/passed (1769ms)
+[llm-verifier] 2026-09-25T20:12:36.791Z candidate candidate-2: failed/not_run (403ms)
+[llm-verifier] 2026-09-25T20:12:36.791Z candidate candidate-3: failed/not_run (403ms)
+[llm-verifier] 2026-09-25T20:12:36.791Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:12:36.791Z run 1e4b6c0c-12b2-491f-ab61-f5a9667ec85d complete: status=failed, winner=none
+  ✖ refuses to revert an interrupted apply over the user's own work (55482.8035ms)
+[llm-verifier] 2026-09-25T20:12:37.960Z run 0811471b-275a-45c7-8cde-917877e76a37 starting: 3 candidates, validation: findstr /C:winner-line notes.md >NUL
+[llm-verifier] 2026-09-25T20:12:37.963Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:12:38.167Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:12:38.425Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:12:38.955Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:12:38.955Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:12:38.956Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:12:38.956Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:12:41.205Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-interrupt-reverse-Jwn37c\state\runs\0811471b-275a-45c7-8cde-917877e76a37\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:12:41.361Z candidate candidate-1: completed/passed (1539ms)
+[llm-verifier] 2026-09-25T20:12:41.361Z candidate candidate-2: failed/not_run (191ms)
+[llm-verifier] 2026-09-25T20:12:41.361Z candidate candidate-3: failed/not_run (192ms)
+[llm-verifier] 2026-09-25T20:12:41.361Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:12:41.365Z run 0811471b-275a-45c7-8cde-917877e76a37 complete: status=winner_selected, winner=candidate-1
+  ✔ reverse-applies the verified patch for an interrupted apply, keeping edits outside its hunks (14146.823ms)
+[llm-verifier] 2026-09-25T20:14:05.301Z run d2036d4f-19a2-4ee7-b7e9-107f96f49ebf starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:14:05.462Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:14:06.042Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:14:06.620Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:14:06.897Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:14:06.898Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:14:06.898Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:14:06.898Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:14:11.770Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-interrupt-noop-UXuJhB\state\runs\d2036d4f-19a2-4ee7-b7e9-107f96f49ebf\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:14:12.414Z candidate candidate-1: completed/passed (3669ms)
+[llm-verifier] 2026-09-25T20:14:12.414Z candidate candidate-2: failed/not_run (856ms)
+[llm-verifier] 2026-09-25T20:14:12.414Z candidate candidate-3: failed/not_run (856ms)
+[llm-verifier] 2026-09-25T20:14:12.414Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:14:12.417Z run d2036d4f-19a2-4ee7-b7e9-107f96f49ebf complete: status=winner_selected, winner=candidate-1
+  ✔ rolls back an interrupted apply that wrote nothing and can be applied again (85995.7083ms)
+[llm-verifier] 2026-09-25T20:14:18.977Z run 125c9f02-3646-443b-a20c-b37536eb2470 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:14:18.980Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:14:19.222Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:14:19.465Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:14:19.551Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:14:19.551Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:14:19.551Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:14:19.551Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:14:21.322Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-index-hv5p9Y\state\runs\125c9f02-3646-443b-a20c-b37536eb2470\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:14:21.644Z candidate candidate-1: completed/passed (1110ms)
+[llm-verifier] 2026-09-25T20:14:21.644Z candidate candidate-2: failed/not_run (317ms)
+[llm-verifier] 2026-09-25T20:14:21.644Z candidate candidate-3: failed/not_run (391ms)
+[llm-verifier] 2026-09-25T20:14:21.644Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:14:21.647Z run 125c9f02-3646-443b-a20c-b37536eb2470 complete: status=winner_selected, winner=candidate-1
+  ✔ restores the index as well as the working tree (7645.8341ms)
+[llm-verifier] 2026-09-25T20:14:25.933Z run 9772b8ea-22e7-4d88-991c-3a4ea45bfcda starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:14:25.935Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:14:26.146Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:14:26.682Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:14:26.749Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:14:26.750Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:14:26.750Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:14:26.750Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:14:29.282Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-untracked-edit-07BHl8\state\runs\9772b8ea-22e7-4d88-991c-3a4ea45bfcda\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:14:29.989Z candidate candidate-1: completed/passed (950ms)
+[llm-verifier] 2026-09-25T20:14:29.989Z candidate candidate-2: failed/not_run (300ms)
+[llm-verifier] 2026-09-25T20:14:29.989Z candidate candidate-3: failed/not_run (300ms)
+[llm-verifier] 2026-09-25T20:14:29.989Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:14:29.991Z run 9772b8ea-22e7-4d88-991c-3a4ea45bfcda complete: status=winner_selected, winner=candidate-1
+  ✔ refuses to delete a patch-added file the user wrote into after an interrupted apply (7092.5196ms)
+[llm-verifier] 2026-09-25T20:14:32.198Z run b6d9d0a7-4cbc-44ce-ab6b-e05caae1bcd8 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:14:32.200Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:14:32.339Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:14:32.391Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:14:32.593Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:14:32.593Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:14:32.594Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:14:32.594Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:14:49.548Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-patchhash-UVnnFC\state\runs\b6d9d0a7-4cbc-44ce-ab6b-e05caae1bcd8\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:14:49.747Z candidate candidate-1: completed/passed (908ms)
+[llm-verifier] 2026-09-25T20:14:49.747Z candidate candidate-2: failed/not_run (387ms)
+[llm-verifier] 2026-09-25T20:14:49.747Z candidate candidate-3: failed/not_run (395ms)
+[llm-verifier] 2026-09-25T20:14:49.747Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:14:49.749Z run b6d9d0a7-4cbc-44ce-ab6b-e05caae1bcd8 complete: status=winner_selected, winner=candidate-1
+  ✔ refuses to trust a record whose stored patch bytes changed (20739.7177ms)
+[llm-verifier] 2026-09-25T20:14:55.648Z run e7e47060-93c7-4939-adf6-02691d480076 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:14:55.651Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:14:55.900Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:14:56.125Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:14:56.475Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:14:56.475Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:14:56.475Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:14:56.475Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:15:00.044Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-committed-Pd2PB0\state\runs\e7e47060-93c7-4939-adf6-02691d480076\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:15:00.284Z candidate candidate-1: completed/passed (1838ms)
+[llm-verifier] 2026-09-25T20:15:00.284Z candidate candidate-2: failed/not_run (746ms)
+[llm-verifier] 2026-09-25T20:15:00.284Z candidate candidate-3: failed/not_run (808ms)
+[llm-verifier] 2026-09-25T20:15:00.284Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:15:00.286Z run e7e47060-93c7-4939-adf6-02691d480076 complete: status=winner_selected, winner=candidate-1
+  ✔ refuses to roll back after the applied patch was committed (10366.3877ms)
+✖ rollback of an applied winner (218397.4675ms)
+[llm-verifier] 2026-09-25T20:15:03.366Z run 63c4128c-7126-4415-9de6-1f8990c6589e starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:15:03.368Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:15:03.448Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:15:03.505Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:15:03.609Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:15:03.609Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:15:03.609Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:15:03.610Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:15:06.772Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-useredit-hxOBI4\state\runs\63c4128c-7126-4415-9de6-1f8990c6589e\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:15:07.245Z candidate candidate-1: completed/passed (2171ms)
+[llm-verifier] 2026-09-25T20:15:07.245Z candidate candidate-2: failed/not_run (1309ms)
+[llm-verifier] 2026-09-25T20:15:07.245Z candidate candidate-3: failed/not_run (1308ms)
+[llm-verifier] 2026-09-25T20:15:07.245Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:15:07.247Z run 63c4128c-7126-4415-9de6-1f8990c6589e complete: status=winner_selected, winner=candidate-1
+▶ user edits after an apply
+  ✔ refuses to revert files the user edited after the apply (6938.9428ms)
+[llm-verifier] 2026-09-25T20:15:11.225Z run cb5bbaed-8f58-4ade-adfc-005cf9935bc2 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:15:11.227Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:15:11.296Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:15:11.636Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:15:21.577Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:15:21.577Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:15:21.577Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:15:21.577Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:15:33.008Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-reapply-wAnZOj\state\runs\cb5bbaed-8f58-4ade-adfc-005cf9935bc2\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:15:33.456Z candidate candidate-1: completed/passed (10590ms)
+[llm-verifier] 2026-09-25T20:15:33.456Z candidate candidate-2: failed/not_run (9566ms)
+[llm-verifier] 2026-09-25T20:15:33.456Z candidate candidate-3: failed/not_run (9562ms)
+[llm-verifier] 2026-09-25T20:15:33.456Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:15:33.458Z run cb5bbaed-8f58-4ade-adfc-005cf9935bc2 complete: status=winner_selected, winner=candidate-1
+  ✔ applies, rolls back, and applies again in the same run (29293.3147ms)
+✔ user edits after an apply (36232.6576ms)
+[llm-verifier] 2026-09-25T20:15:39.612Z run 4b6de97f-8755-4b84-9562-5e275c8bfd8f starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:15:39.613Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:15:39.707Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:15:39.788Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:15:41.482Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:15:41.482Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:15:41.482Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:15:41.482Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:15:44.475Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-lock-stale-l17ng9\state\runs\4b6de97f-8755-4b84-9562-5e275c8bfd8f\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:15:45.238Z candidate candidate-1: completed/passed (1847ms)
+[llm-verifier] 2026-09-25T20:15:45.238Z candidate candidate-2: failed/not_run (313ms)
+[llm-verifier] 2026-09-25T20:15:45.238Z candidate candidate-3: failed/not_run (1055ms)
+[llm-verifier] 2026-09-25T20:15:45.238Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:15:45.241Z run 4b6de97f-8755-4b84-9562-5e275c8bfd8f complete: status=winner_selected, winner=candidate-1
+▶ repository lock
+  ✔ reclaims a lock whose heartbeat stopped even though its pid still answers (8704.0464ms)
+[llm-verifier] 2026-09-25T20:15:48.496Z run a48cf770-c352-44b5-a307-123895b6fe29 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:15:48.498Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:15:48.655Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:15:48.857Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:15:49.113Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:15:49.113Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:15:49.113Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:15:49.113Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:15:51.095Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-lock-remote-bAkXhb\state\runs\a48cf770-c352-44b5-a307-123895b6fe29\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:15:51.229Z candidate candidate-1: completed/passed (889ms)
+[llm-verifier] 2026-09-25T20:15:51.229Z candidate candidate-2: failed/not_run (600ms)
+[llm-verifier] 2026-09-25T20:15:51.229Z candidate candidate-3: failed/not_run (600ms)
+[llm-verifier] 2026-09-25T20:15:51.229Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:15:51.230Z run a48cf770-c352-44b5-a307-123895b6fe29 complete: status=winner_selected, winner=candidate-1
+  ✔ never probes a foreign host's pid to steal a live lock (4984.2488ms)
+[llm-verifier] 2026-09-25T20:16:27.773Z run 8de1440d-2b6b-42d1-be09-0883480328a4 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:16:27.776Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:16:27.941Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:16:28.037Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:16:29.213Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:16:29.213Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:16:29.214Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:16:29.214Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:16:41.934Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-lock-midwrite-JcC3KZ\state\runs\8de1440d-2b6b-42d1-be09-0883480328a4\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:16:52.728Z candidate candidate-1: completed/passed (12065ms)
+[llm-verifier] 2026-09-25T20:16:52.728Z candidate candidate-2: failed/not_run (10865ms)
+[llm-verifier] 2026-09-25T20:16:52.728Z candidate candidate-3: failed/not_run (10867ms)
+[llm-verifier] 2026-09-25T20:16:52.728Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:16:52.731Z run 8de1440d-2b6b-42d1-be09-0883480328a4 complete: status=winner_selected, winner=candidate-1
+  ✔ does not reclaim a live holder's lock while its record is mid-rewrite (64106.4878ms)
+[llm-verifier] 2026-09-25T20:16:58.272Z run d4da3e3e-3f79-468a-ae53-028c23a56cf5 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:16:58.275Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:16:58.530Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:16:58.700Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:16:59.266Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:16:59.266Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:16:59.266Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:16:59.266Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:17:01.189Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-lock-takeover-iXSksO\state\runs\d4da3e3e-3f79-468a-ae53-028c23a56cf5\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:17:01.656Z candidate candidate-1: completed/passed (685ms)
+[llm-verifier] 2026-09-25T20:17:01.656Z candidate candidate-2: failed/not_run (236ms)
+[llm-verifier] 2026-09-25T20:17:01.656Z candidate candidate-3: failed/not_run (250ms)
+[llm-verifier] 2026-09-25T20:17:01.656Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:17:01.659Z run d4da3e3e-3f79-468a-ae53-028c23a56cf5 complete: status=winner_selected, winner=candidate-1
+  ✔ never lets two peers take over one crashed lock (88359.6941ms)
+[llm-verifier] 2026-09-25T20:18:25.500Z run 3c392e0b-1a90-4af7-9f62-f5da8f157f13 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:18:25.502Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:18:25.591Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:18:25.778Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:18:25.852Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:18:25.852Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:18:25.852Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:18:25.852Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:18:27.696Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-lock-concurrent-apply-VKJPvO\state\runs\3c392e0b-1a90-4af7-9f62-f5da8f157f13\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:18:28.244Z candidate candidate-1: completed/passed (1044ms)
+[llm-verifier] 2026-09-25T20:18:28.244Z candidate candidate-2: failed/not_run (153ms)
+[llm-verifier] 2026-09-25T20:18:28.244Z candidate candidate-3: failed/not_run (153ms)
+[llm-verifier] 2026-09-25T20:18:28.244Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:18:28.246Z run 3c392e0b-1a90-4af7-9f62-f5da8f157f13 complete: status=winner_selected, winner=candidate-1
+  ✔ lets only one of two concurrent applies touch the run state (5603.5046ms)
+✔ repository lock (171758.7772ms)
+[llm-verifier] 2026-09-25T20:18:31.738Z run 64169cec-3a01-4eeb-984d-addabe28c66f starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:18:31.740Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:18:31.802Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:18:31.973Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:18:32.029Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:18:32.029Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:18:32.029Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:18:32.029Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:18:49.580Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-apply-disabled-Fpfo9k\state\runs\64169cec-3a01-4eeb-984d-addabe28c66f\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:19:01.085Z candidate candidate-1: completed/passed (8438ms)
+[llm-verifier] 2026-09-25T20:19:01.085Z candidate candidate-2: failed/not_run (7532ms)
+[llm-verifier] 2026-09-25T20:19:01.085Z candidate candidate-3: failed/not_run (7515ms)
+[llm-verifier] 2026-09-25T20:19:01.085Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:19:01.087Z run 64169cec-3a01-4eeb-984d-addabe28c66f complete: status=winner_selected, winner=candidate-1
+▶ operator kill switch
+  ✔ refuses an apply whose approval wait ended after the switch was flipped (35903.7856ms)
+✔ operator kill switch (35904.126ms)
+[llm-verifier] 2026-09-25T20:19:07.998Z run 87fd593c-6e15-4ee9-97a0-2d947fe5680e starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:19:08.001Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:19:08.096Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:19:08.180Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:19:08.296Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:19:08.296Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:19:08.296Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:19:08.296Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:19:09.602Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-headsafe-nMhNJV\state\runs\87fd593c-6e15-4ee9-97a0-2d947fe5680e\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:19:09.840Z candidate candidate-1: completed/passed (598ms)
+[llm-verifier] 2026-09-25T20:19:09.840Z candidate candidate-2: failed/not_run (280ms)
+[llm-verifier] 2026-09-25T20:19:09.840Z candidate candidate-3: failed/not_run (270ms)
+[llm-verifier] 2026-09-25T20:19:09.840Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:19:09.842Z run 87fd593c-6e15-4ee9-97a0-2d947fe5680e complete: status=winner_selected, winner=candidate-1
+▶ rollback and re-apply around a moved HEAD or a leftover handle
+  ✔ rolls back when HEAD moved but no commit in between touches a recorded path (5493.8388ms)
+[llm-verifier] 2026-09-25T20:19:13.183Z run bcd8f84a-3a1a-4cea-ba9e-031d6299ad86 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:19:13.185Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:19:13.478Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:19:13.809Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:19:14.243Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:19:14.243Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:19:14.243Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:19:14.243Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:19:16.568Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-headtouch-tB1hev\state\runs\bcd8f84a-3a1a-4cea-ba9e-031d6299ad86\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:19:16.977Z candidate candidate-1: completed/passed (733ms)
+[llm-verifier] 2026-09-25T20:19:16.977Z candidate candidate-2: failed/not_run (227ms)
+[llm-verifier] 2026-09-25T20:19:16.977Z candidate candidate-3: failed/not_run (227ms)
+[llm-verifier] 2026-09-25T20:19:16.977Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:19:16.979Z run bcd8f84a-3a1a-4cea-ba9e-031d6299ad86 complete: status=winner_selected, winner=candidate-1
+  ✔ still refuses when the committed range touches the patched path (8001.0153ms)
+[llm-verifier] 2026-09-25T20:19:20.553Z run d306c77d-05c6-4863-91d9-12d1a6127f1a starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:19:20.555Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:19:20.758Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:19:20.829Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:19:20.883Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:19:20.883Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:19:20.884Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:19:20.884Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:19:22.228Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-stalehandle-Se9oFT\state\runs\d306c77d-05c6-4863-91d9-12d1a6127f1a\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:19:22.380Z candidate candidate-1: completed/passed (589ms)
+[llm-verifier] 2026-09-25T20:19:22.381Z candidate candidate-2: failed/not_run (151ms)
+[llm-verifier] 2026-09-25T20:19:22.381Z candidate candidate-3: failed/not_run (151ms)
+[llm-verifier] 2026-09-25T20:19:22.381Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:19:22.383Z run d306c77d-05c6-4863-91d9-12d1a6127f1a complete: status=winner_selected, winner=candidate-1
+  ✔ re-applies over a handle predating the rollback receipt, and refuses over a live one (6373.7197ms)
+[llm-verifier] 2026-09-25T20:19:26.992Z run 335a10ba-bf0a-4795-bf90-8a84c4386da7 starting: 3 candidates, validation: if not exist result.txt exit 1
+[llm-verifier] 2026-09-25T20:19:26.994Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:19:27.183Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:19:27.259Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:19:27.470Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:19:27.470Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:19:27.470Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:19:27.470Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:19:29.917Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-rb-twonotes-Tv8izZ\state\runs\335a10ba-bf0a-4795-bf90-8a84c4386da7\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:19:30.195Z candidate candidate-1: completed/passed (1288ms)
+[llm-verifier] 2026-09-25T20:19:30.195Z candidate candidate-2: failed/not_run (803ms)
+[llm-verifier] 2026-09-25T20:19:30.195Z candidate candidate-3: failed/not_run (851ms)
+[llm-verifier] 2026-09-25T20:19:30.195Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:19:30.197Z run 335a10ba-bf0a-4795-bf90-8a84c4386da7 complete: status=winner_selected, winner=candidate-1
+  ✔ keeps both disclosures when the apply was interrupted and HEAD also moved (7270.5871ms)
+✔ rollback and re-apply around a moved HEAD or a leftover handle (27139.712ms)
+▶ patchTouchedFiles understands every git header form it will meet
+  ✔ unquotes a C-quoted path so the HEAD proof can intersect the -z name list (0.6435ms)
+  ✔ returns null rather than a narrower set when a header is not a path pair (0.1344ms)
+  ✔ refuses a quoted run it cannot decode instead of inventing a name (0.2206ms)
+✔ patchTouchedFiles understands every git header form it will meet (1.1627ms)
+ℹ tests 25
+ℹ suites 6
+ℹ pass 24
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 491920.3947
+
+✖ failing tests:
+
+test at tests\rollback.test.ts:243:3
+✖ refuses to revert an interrupted apply over the user's own work (55482.8035ms)
+  AssertionError [ERR_ASSERTION]: ranking: candidate-1 completed/passed none | candidate-2 failed/not_run candidate exited with code 2 | candidate-3 failed/not_run candidate exited with code 2
+  + actual - expected
+  
+  + 'failed'
+  - 'winner_selected'
+  
+      at fixtureRun (file:///G:/zcode-project/llm-verify/dsh-llm-verifier/tests/rollback.test.ts:148:10)
+      at async applyFixtureRun (file:///G:/zcode-project/llm-verify/dsh-llm-verifier/tests/rollback.test.ts:164:19)
+      at async TestContext.<anonymous> (file:///G:/zcode-project/llm-verify/dsh-llm-verifier/tests/rollback.test.ts:244:61)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'failed',
+    expected: 'winner_selected',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

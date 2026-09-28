@@ -803,6 +803,19 @@ describe("repository lock", () => {
     assert.match(applied.failure ?? "", /the patch is applied/u);
     assert.match(applied.failure ?? "", /rollback_verified_winner/u);
     assert.equal(await readText(repositoryPath, "result.txt"), "winner\n");
+    // The takeover record above is a live one, and a release that deletes a
+    // foreign lock to clear rollback's way was exactly the 928 P0-1 hole this
+    // suite now pins shut: rollback must acquire through the LEGAL path instead,
+    // by the planted record having gone stale (LOCK_STALE_AFTER_MS judgement),
+    // not by the apply's release having removed someone else's lock.
+    const staleHeartbeat = new Date(Date.now() - 120_000).toISOString();
+    await writeFile(join(lockDirectory, lockFile), `${JSON.stringify({
+      repositoryPath,
+      pid: 4_200_000,
+      hostname: "some-other-host",
+      createdAt: staleHeartbeat,
+      heartbeatAt: staleHeartbeat,
+    })}\n`);
     const rollback = await rollbackVerifiedWinner({ runId, repositoryPath }, config);
     assert.equal(rollback.status, "rolled_back");
   });

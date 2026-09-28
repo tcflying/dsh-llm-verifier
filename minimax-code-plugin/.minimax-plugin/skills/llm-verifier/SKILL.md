@@ -34,9 +34,15 @@ descriptions:
    - `review_pending` → read `reportPath` (and each `candidate-N.patch` listed in the
      response), judge the candidates yourself, then call `select_verified_candidate`
      with your `candidateId` and a short `reason`. Never skip the review.
-3. `apply_verified_winner` applies the winner patch to `repoPath`.
+3. `apply_verified_winner` is TWO-STEP by design: the first call (without `confirm`) runs every
+   pre-flight guard and returns an `approval_required` preview (patch SHA-256, base commit,
+   repository path); read it, then call again with `confirm: true` to actually apply the patch to
+   `repoPath`. Never pass `confirm: true` without having read the preview in the same session.
+   Every call that must leave preview mode carries the boolean `true` — the strings `"true"` or
+   `1` do not count, and a call without `confirm` never mutates anything even when it is a retry.
 4. If the user rejects the result, `rollback_verified_winner` reverses the patch
-   (it refuses automatically if files were edited after apply).
+   (it refuses automatically if files were edited after apply, and unstages the touched paths
+   so the next apply is not blocked by this rollback's own index leftovers).
 
 ## Settings
 Read or change settings with `verifier_get_config` / `verifier_configure`:

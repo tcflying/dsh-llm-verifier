@@ -23,19 +23,34 @@ const HOST_EXTENSIONS = ["timeout"];
 const failures = [];
 
 // Every host that is supposed to be able to launch the engine, with the accessor that finds our entry.
-// The accessors differ because the hosts differ: MiniMax and the shipped artifact use a top-level
-// "mcpServers", ZCode nests "mcp.servers" inside its whole-app config, JCode's file keys it "servers".
+// The accessors differ because the hosts differ: MiniMax's plugin mechanism reads the mcp.json beside
+// the engine inside the plugin directory, ZCode nests "mcp.servers" inside its whole-app config,
+// JCode's file keys it "servers", and Qoder CN's agent runtime reads a WORKSPACE-level .mcp.json —
+// its IDE-level SharedClientCache path was measured to be ignored by the agent runtime (922/928).
 // A gate that parsed only "mcpServers" silently validated 2 of the 4 registrations on this box.
 const ENGINE = `${REPO}/minimax-code-plugin/.minimax-plugin/mcp-server.mjs`;
+const WORKSPACE = "G:/zcode-project/llm-verify";
 const HOSTS = [
-  { label: "minimax", file: "C:/Users/datoo/.minimax/mcp.json", pick: (d) => d.mcpServers?.["llm-verifier"], required: true },
+  // The plugin-path file is what MiniMax Code actually loads (proven live 2026-09-28: this session's
+  // own mcp__llm-verifier tools run through it). The user-level ~/.minimax/mcp.json used to sit here
+  // and its enabled:false was a false red on a retired path — see the legacy sweep below.
+  { label: "minimax", file: "C:/Users/datoo/.minimax/plugins/llm-verifier/.minimax-plugin/mcp.json", pick: (d) => d.mcpServers?.["llm-verifier"], required: true },
   { label: "zcode", file: "C:/Users/datoo/.zcode/cli/config.json", pick: (d) => d.mcp?.servers?.["llm-verifier"], required: true },
   { label: "jcode", file: "C:/Users/datoo/.jcode/mcp.json", pick: (d) => d.servers?.["llm-verifier"], required: true },
-  // Qoder CN and Qoder carry only SKILL.md: no MCP registration exists, so there is nothing to validate.
-  // required:false is not a blind spot — if someone later registers it, hostCheck validates the new entry,
-  // and an engine file that no host points at can still be caught by the sync drift detector.
-  { label: "qoder-cn", file: "C:/Users/datoo/.qoder-cn/mcp.json", pick: (d) => d.mcpServers?.["llm-verifier"] ?? d.servers?.["llm-verifier"], required: false },
+  // Qoder CN: workspace-level registration (the file the agent runtime reads) plus the approval list.
+  // The old comment here said "no MCP registration exists" — that was wrong twice over: the workspace
+  // .mcp.json has existed since 09-22, and the CN approval list was amended the same day (928 §八-2).
+  { label: "qoder-cn", file: `${WORKSPACE}/.mcp.json`, pick: (d) => d.mcpServers?.["llm-verifier"], required: true },
+  // International Qoder is genuinely not installed (approval list has no entry); SKILL.md-only.
   { label: "qoder", file: "C:/Users/datoo/.qoder/mcp.json", pick: (d) => d.mcpServers?.["llm-verifier"] ?? d.servers?.["llm-verifier"], required: false },
+];
+
+// Qoder gates project MCP servers behind an explicit approval list in settings.json; a workspace
+// .mcp.json without its approval is a registration the host will never launch (928 P1-3: neither
+// half was watched before). CN approved it on 09-22; international has no entry and no install.
+const APPROVALS = [
+  { label: "qoder-cn", file: "C:/Users/datoo/.qoder-cn/settings.json", required: true },
+  { label: "qoder", file: "C:/Users/datoo/.qoder/settings.json", required: false },
 ];
 
 // The per-server rules, shared by the shipped artifact and the installed overlays so the two cannot
@@ -160,6 +175,38 @@ for (const [i, f] of INSTALLED.entries()) {
   resolveEngine(label, s, path.posix.dirname(INSTALLED[1].replaceAll("\\", "/")));
 }
 for (const h of HOSTS) hostCheck(h);
+
+// The retired user-level MiniMax registration. It no longer decides anything (the plugin path loads),
+// so an enabled flag on it is neither green nor red — it is a trap for the next auditor who mistakes
+// it for the live path, which is exactly how 928's P0-4 false red happened. Presence = clean it up.
+{
+  const legacy = "C:/Users/datoo/.minimax/mcp.json";
+  try {
+    const doc = JSON.parse(fs.readFileSync(legacy, "utf8"));
+    if (doc.mcpServers?.["llm-verifier"]) {
+      failures.push(`minimax-legacy: ${legacy} still carries a retired llm-verifier entry (enabled=${JSON.stringify(doc.mcpServers["llm-verifier"].enabled)}); the plugin path supersedes it — delete the entry so nothing chases this path again`);
+    } else {
+      console.log(`ok  minimax-legacy ${legacy} carries no llm-verifier entry`);
+    }
+  } catch (e) {
+    if (e.code !== "ENOENT") failures.push(`minimax-legacy: ${legacy} is unparsable (${e.message})`);
+    else console.log(`ok  minimax-legacy ${legacy} is gone`);
+  }
+}
+
+for (const a of APPROVALS) {
+  try {
+    const doc = JSON.parse(fs.readFileSync(a.file, "utf8"));
+    const list = doc.mcp?.enabledProjectMcpServers;
+    const has = Array.isArray(list) && list.includes("llm-verifier");
+    if (has) console.log(`ok  ${a.label.padEnd(9)} approval list includes llm-verifier (${list.length} entries)`);
+    else if (a.required) failures.push(`${a.label}: ${a.file} approval list does not include llm-verifier — the workspace registration exists but the host will never launch it`);
+    else console.log(`n/a ${a.label.padEnd(9)} not installed (no approval entry, no workspace registration)`);
+  } catch (e) {
+    if (a.required) failures.push(`${a.label}: ${a.file} is missing or unparsable (${e.message})`);
+    else console.log(`n/a ${a.label.padEnd(9)} no settings file`);
+  }
+}
 
 console.log(failures.length ? `\nMCP CONFIG FAILURES:\n - ${failures.join("\n - ")}` : "\nMCP CONFIG OK");
 process.exit(failures.length ? 1 : 0);

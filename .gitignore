@@ -5,6 +5,10 @@ __pycache__/
 *.pyc
 .DS_Store
 *.log
+# Gate receipts are .log files and wave-28's rule says they must be git-tracked as one-shot
+# evidence; without this exception the blanket *.log excluded all 30 of them while the ledger
+# claimed they were under version control (found 928 §7.1).
+!docs/proof/logs/**/*.log
 .env
 .env.*
 !.env.example
@@ -15,3 +19,5 @@ coverage/
 .npmrc
 .pnpmrc
 .codegraph/
+.omo/
+{}

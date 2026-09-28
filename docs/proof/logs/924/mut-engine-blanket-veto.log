@@ -1,0 +1,36 @@
+(node:55516) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ S21：死线到期时只剩一个带补丁的幸存者，也不得去起一次注定被打断的评审 (123019.1323ms)
+(node:12716) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✖ S22：死线到期时已有可用幸存者，parent_agent 模式必须照常给出判决 (121656.9054ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 246388.5856
+
+✖ failing tests:
+
+test at minimax-code-plugin\tests\e2e.test.mjs:736:1
+✖ S22：死线到期时已有可用幸存者，parent_agent 模式必须照常给出判决 (121656.9054ms)
+  AssertionError [ERR_ASSERTION]: 判决输入已经齐了，晚一步的死线不得把 run 折成 timeout: [["candidate-1","succeeded","passed","patch"],["candidate-2","succeeded","passed","patchError"]] man=timeout
+  + actual - expected
+  
+  + 'timeout'
+  - 'winner_selected'
+  
+      at TestContext.<anonymous> (file:///G:/zcode-project/llm-verify/dsh-llm-verifier/minimax-code-plugin/tests/e2e.test.mjs:757:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'timeout',
+    expected: 'winner_selected',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

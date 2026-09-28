@@ -1,0 +1,18 @@
+[llm-verifier] 2026-09-25T20:33:19.793Z run e8fd62e4-fb2e-4d90-8403-fe9ff27ac64b starting: 3 candidates, validation: if not exist added-by-winner.txt exit 1
+[llm-verifier] 2026-09-25T20:33:19.795Z creating worktree 1/3
+[llm-verifier] 2026-09-25T20:33:19.949Z creating worktree 2/3
+[llm-verifier] 2026-09-25T20:33:19.995Z creating worktree 3/3
+[llm-verifier] 2026-09-25T20:33:20.038Z launching 3 candidates (max 3 concurrent)
+[llm-verifier] 2026-09-25T20:33:20.038Z candidate candidate-1 started
+[llm-verifier] 2026-09-25T20:33:20.038Z candidate candidate-2 started
+[llm-verifier] 2026-09-25T20:33:20.038Z candidate candidate-3 started
+[llm-verifier] 2026-09-25T20:33:21.814Z residual process tree observations written to C:\Users\datoo\AppData\Local\Temp\dsh-abortproof-nr4XQY\state\runs\e8fd62e4-fb2e-4d90-8403-fe9ff27ac64b\artifacts\process-tree.log
+[llm-verifier] 2026-09-25T20:33:21.883Z candidate candidate-1: completed/passed (599ms)
+[llm-verifier] 2026-09-25T20:33:21.883Z candidate candidate-2: failed/not_run (217ms)
+[llm-verifier] 2026-09-25T20:33:21.883Z candidate candidate-3: failed/not_run (231ms)
+[llm-verifier] 2026-09-25T20:33:21.883Z 1/3 candidates eligible
+[llm-verifier] 2026-09-25T20:33:21.884Z run e8fd62e4-fb2e-4d90-8403-fe9ff27ac64b complete: status=winner_selected, winner=candidate-1
+ABORT_LANDED_IN_CLEANUP=yes
+CANCELLED_CANDIDATES=0
+STATUS=winner_selected WINNER=none FAILURE=none
+PROOF_PASS an abort that truncated no candidate kept the decided winner

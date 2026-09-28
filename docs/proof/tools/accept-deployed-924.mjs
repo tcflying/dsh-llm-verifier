@@ -160,11 +160,18 @@ for (const { host, p } of queue) {
       String((await e.tool("select_verified_candidate", { runId: run.runId, candidateId: "candidate-1", reason: "probe" })).__error ?? "").includes("expected review_pending"),
       "engine wording");
 
-    const ap = await e.tool("apply_verified_winner", { runId: run.runId });
+    // The apply tool is two-step since 928-plan F15: a call without confirm must return an
+    // approval preview and touch nothing. Assert that door on a real deployed engine before
+    // driving the confirmed apply through the rest of the cycle.
+    const pv = await e.tool("apply_verified_winner", { runId: run.runId });
+    check(`${tag} unconfirmed apply returns a preview, tree untouched`,
+      pv.status === "approval_required" && !existsSync(join(repo, "solution.txt")),
+      JSON.stringify(pv).slice(0, 220));
+    const ap = await e.tool("apply_verified_winner", { runId: run.runId, confirm: true });
     check(`${tag} apply on a real repo`, ap.status === "applied", JSON.stringify(ap).slice(0, 220));
     check(`${tag} winner content on disk`, existsSync(join(repo, "solution.txt")), existsSync(join(repo, "solution.txt")) ? readFileSync(join(repo, "solution.txt"), "utf8").trim() : "missing");
     check(`${tag} a second apply of the same run is refused`,
-      String((await e.tool("apply_verified_winner", { runId: run.runId })).__error ?? "").includes("status is applied"),
+      String((await e.tool("apply_verified_winner", { runId: run.runId, confirm: true })).__error ?? "").includes("status is applied"),
       "engine wording at mcp-server.mjs:1050");
 
     const rb = await e.tool("rollback_verified_winner", { runId: run.runId });
@@ -175,7 +182,7 @@ for (const { host, p } of queue) {
     check(`${tag} repo clean after run->apply->rollback`, g(repo, "status", "--porcelain").trim() === "", g(repo, "status", "--porcelain"));
     // The engine deliberately allows re-apply from rolled_back (mcp-server.mjs:1050); prove the
     // whole cycle is repeatable rather than one-shot.
-    const re = await e.tool("apply_verified_winner", { runId: run.runId });
+    const re = await e.tool("apply_verified_winner", { runId: run.runId, confirm: true });
     check(`${tag} re-apply after rollback works`, re.status === "applied", JSON.stringify(re).slice(0, 160));
     const re2 = await e.tool("rollback_verified_winner", { runId: run.runId });
     check(`${tag} second rollback restores again`, re2.status === "rolled_back" && g(repo, "status", "--porcelain").trim() === "", re2.status);

@@ -141,12 +141,14 @@ const verifiedBestOfOutputSchema = {
     eligibleCandidateCount: { type: "integer", required: true },
     status: {
       type: "string",
-      enum: ["failed", "no_winner", "winner_selected", "review_pending"],
+      // "timeout"/"cancelled" are the engine's run-level terminal words; a host schema that
+      // omits them makes the engine's own status a dead branch on this side (928 C-station).
+      enum: ["failed", "no_winner", "winner_selected", "review_pending", "timeout", "cancelled"],
       required: true,
     },
     selectionMethod: {
       oneOf: [
-        { type: "string", enum: ["llm_verifier", "validation_only", "dsh_model"] },
+        { type: "string", enum: ["llm_verifier", "validation_only", "dsh_model", "none", "pending", "model_review", "single_survivor", "parent_review"] },
         { type: "null" },
       ],
       required: true,
@@ -208,14 +210,16 @@ const applyWinnerOutputSchema = {
     runId: { type: "string", required: true },
     status: {
       type: "string",
-      enum: ["applied", "applied_validation_failed"],
+      // "applied_validation_cancelled": the patch landed, the host aborted the post-apply
+      // validation mid-flight — neither "failed" nor "passed" (engine word, 928 C-station).
+      enum: ["applied", "applied_validation_failed", "applied_validation_cancelled"],
       required: true,
     },
     patchSha256: { type: "string", required: true },
     changedFiles: { type: "array", items: { type: "string" }, required: true },
     validationStatus: {
       type: "string",
-      enum: ["failed", "passed", "timed_out"],
+      enum: ["failed", "passed", "timed_out", "cancelled"],
       required: true,
     },
     validationLogPaths: { type: "array", items: { type: "string" }, required: true },

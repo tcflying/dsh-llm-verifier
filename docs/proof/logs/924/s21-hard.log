@@ -1,0 +1,14 @@
+(node:512) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ S21：死线到期时只剩一个带补丁的幸存者，也不得去起一次注定被打断的评审 (122535.783ms)
+(node:4892) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ S22：死线到期时已有可用幸存者，parent_agent 模式必须照常给出判决 (133040.4421ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 257112.1054

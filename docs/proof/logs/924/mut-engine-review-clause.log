@@ -1,0 +1,36 @@
+(node:16452) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✖ S21：死线到期时只剩一个带补丁的幸存者，也不得去起一次注定被打断的评审 (121903.1513ms)
+(node:33456) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ S22：死线到期时已有可用幸存者，parent_agent 模式必须照常给出判决 (121801.1905ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 244254.2798
+
+✖ failing tests:
+
+test at minimax-code-plugin\tests\e2e.test.mjs:694:1
+✖ S21：死线到期时只剩一个带补丁的幸存者，也不得去起一次注定被打断的评审 (121903.1513ms)
+  AssertionError [ERR_ASSERTION]: 死线吃掉评审预算必须报 timeout，不得塌成 review_pending 冒充弃权: [["candidate-1","succeeded","passed","patch"],["candidate-2","succeeded","passed","patchError"]] method=pending
+  + actual - expected
+  
+  + 'review_pending'
+  - 'timeout'
+  
+      at TestContext.<anonymous> (file:///G:/zcode-project/llm-verify/dsh-llm-verifier/minimax-code-plugin/tests/e2e.test.mjs:719:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'review_pending',
+    expected: 'timeout',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

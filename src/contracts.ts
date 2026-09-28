@@ -69,11 +69,23 @@ export interface VerifiedBestOfResult {
   readonly requestedCandidateCount: CandidateCount;
   readonly completedCandidateCount: number;
   readonly eligibleCandidateCount: number;
-  readonly status: "failed" | "no_winner" | "winner_selected" | "review_pending";
+  // "timeout"/"cancelled" are run-level terminal states the standalone .mjs engine already
+  // reports (its run deadline and host-cancel paths). They were absent here, so every host
+  // switch on this union treated the engine's own words as unreachable dead branches (928 C-4).
+  readonly status: "cancelled" | "failed" | "no_winner" | "review_pending" | "timeout" | "winner_selected";
+  // The engine side names its methods none/pending/model_review/single_survivor/parent_review;
+  // this layer names them llm_verifier/validation_only/dsh_model. The union is deliberate —
+  // narrowing it would delete information one of the two implementations reports (928: expand,
+  // do not trim).
   readonly selectionMethod:
     | "llm_verifier"
     | "validation_only"
     | "dsh_model"
+    | "none"
+    | "pending"
+    | "model_review"
+    | "single_survivor"
+    | "parent_review"
     | null;
   readonly winnerId: string | null;
   readonly ranking: PublicCandidateResult[];
@@ -158,10 +170,13 @@ export interface ApplyRuntimeDependencies {
 export interface ApplyVerifiedWinnerResult {
   readonly schemaVersion: 1;
   readonly runId: string;
-  readonly status: "applied" | "applied_validation_failed";
+  // "applied_validation_cancelled" is the engine's word for a patch that landed but whose
+  // post-apply validation was aborted by the host mid-flight; conflating it with either
+  // neighbour says "failed" or says "passed" about a run that was neither (928 C-station).
+  readonly status: "applied" | "applied_validation_failed" | "applied_validation_cancelled";
   readonly patchSha256: string;
   readonly changedFiles: string[];
-  readonly validationStatus: "failed" | "passed" | "timed_out";
+  readonly validationStatus: "cancelled" | "failed" | "passed" | "timed_out";
   readonly validationLogPaths: string[];
   readonly failure: string | null;
 }

@@ -1,0 +1,88 @@
+(node:52132) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ best-of-N 全状态机 (1271.0907ms)
+✔ mcode_model 评审：解析失败不得伪造 winner (686.8887ms)
+✔ enabled:false 只放行配置类工具 (5.1509ms)
+✔ G0 安全护栏：模型名注入拒绝 / runId 穿越拒绝 / 坏帧不死 / 配置类型校验 (8.446ms)
+✔ 协议关卡：initialize 之前的 tools/call 必须被拒 (60.7181ms)
+✔ config.json 撕裂 = 故障关闭（不得回填 enabled:true） (57.6283ms)
+✔ writeJson 临时文件名唯一：残留 config.json.tmp 不得 brick 配置面 (62.8941ms)
+✔ 模型白名单在 spawn 使用点拦截（绕过 configure 预置 config.json） (84.7793ms)
+(node:6960) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:44344) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:45816) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ 评审谎报：空 scores / 改判 reviewer 选择 (3325.1659ms)
+(node:22392) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ >1MiB 补丁不得被写成空补丁 (738.8105ms)
+✔ validationCommand 必须真的执行；落盘状态 == 返回状态；空补丁拒绝落地 (903.0526ms)
+(node:24060) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ 无 diff 的候选不得被当成已验证成果 (757.0576ms)
+(node:35212) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ totalTimeoutMin 是全阶段遵守的真死线（含进程组回收） (76448.2957ms)
+(node:53352) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ stdin 断开：中止在飞的 run、回收进程树，然后才退出 (21232.8439ms)
+(node:23224) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ 补丁抓取是异步的：抓取期间 ping 有应答，取消能掐断在飞的 git diff (1375.5752ms)
+✔ apply_verified_winner 可取消：复验被掐掉后不得回报成功 (1140.4752ms)
+✔ npm 型验证先在 worktree 装依赖：失败归因到安装，且不污染 origin (1329.0469ms)
+✔ worktree 里新装的 node_modules 不得进入候选补丁 (1251.7279ms)
+(node:41192) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ 非 UTF-8 内容必须按字节进补丁、按字节落地 (1506.6454ms)
+(node:55156) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ 超时配置必须有上限，天花板上的 run 不得瞬死 (603.2995ms)
+(node:51164) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[llm-verifier] cleanup receipt not written: EPERM: operation not permitted, rename 'C:\Users\datoo\AppData\Local\Temp\llmv-e2e-8yBmY7\data-poolfail\runs\20260925092809-722dcb\manifest.json.cb230717ecc5.tmp' -> 'C:\Users\datoo\AppData\Local\Temp\llmv-e2e-8yBmY7\data-poolfail\runs\20260925092809-722dcb\manifest.json'
+✔ worker 抛错不得孤儿子兄弟进程：等齐、中止、并把内因说出来 (1303.2995ms)
+(node:2932) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ 正对照：无中止时兄弟进程活着并跑完（pid 探针本身有效） (21248.1918ms)
+✔ 并发 verifier_configure 不得互相吃字段（kill switch 丢不得） (153.8826ms)
+(node:54348) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ run 体内意外抛错：回执不得停在 running，错仍要报给宿主 (945.273ms)
+✔ apply 的文件清单不得被缓冲区上限掐成半条 (9604.5313ms)
+[llm-verifier] worktree root not removed: C:\Users\datoo\AppData\Local\Temp\llmv-e2e-hang-23K5Ti\data-hanggit\runs\20260925092842-b32169\worktrees (EPERM, Permission denied: \\?\C:\Users\datoo\AppData\Local\Temp\llmv-e2e-hang-23K5Ti\data-hanggit\runs\20260925092842-b32169\worktrees '\\?\C:\Users\datoo\AppData\Local\Temp\llmv-e2e-hang-23K5Ti\data-hanggit\runs\20260925092842-b32169\worktrees')
+✔ 同步 git 卡死必须按超时上报，不得当作成功（且测自己收掉孤儿钩子） (15947.6362ms)
+✔ G0：kill switch 必须对'入队后才被停用'的那一枪生效（授权在队列内重读） (20878.1551ms)
+✔ G1 apply：脏工作区状态读不出来时必须拒绝，而不是当成干净 (457.4045ms)
+(node:51840) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:55976) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:13608) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:20712) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:35552) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ G2：坏掉的 GIT_TIMEOUT_MS 必须回落到默认值，run 照常跑完 (3171.8086ms)
+(node:40180) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ G1(Windows)：仓库/数据目录含空格时 mcode argv 不得被 shell 拆碎 (801.9009ms)
+(node:48360) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ G1(Windows)：MCODE_BIN 位于带空格目录时 run 必须跑完 (506.0678ms)
+(node:3764) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ buildReport：生成失败时必须把捕获到的 stderr 印出来（成因不外推到模型头上） (699.6442ms)
+✔ G3：rollback 只认那三个真的落了补丁的状态，别按前缀认 applied_* (754.6471ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 196368.228
+E2E_EXIT=0

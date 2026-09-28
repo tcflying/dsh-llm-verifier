@@ -69,8 +69,15 @@ const sleepSync = (ms) => {
 };
 const stage = (name, cmd, args, spawnOpts = {}) => {
   const t0 = Date.now();
-  const r = spawnSync(cmd, args, { cwd: REPO, encoding: "utf8", shell: true, maxBuffer: 64e6, ...spawnOpts });
+  // A stage without a budget is a hang, not a red: spawnSync never returns, so the `exit !== 0`
+  // terms below never fire and one wedged suite freezes the whole gate (measured 2026-09-28:
+  // 45 s poll, still blocked; the timeout option below returned the same shape in 3.0 s with
+  // signal=SIGTERM). 20 min bounds every stage by default; the two long suites override with 30.
+  // The TS suite carries --test-timeout=600000 internally, so any budget here must stay above
+  // that ceiling or the stage budget fires while node:test is still allowed to run.
+  const r = spawnSync(cmd, args, { cwd: REPO, encoding: "utf8", shell: true, maxBuffer: 64e6, timeout: 20 * 60_000, ...spawnOpts });
   const secs = (Date.now() - t0) / 1000;
+  const killed = r.signal != null || r.status === null;
   const out = (r.stdout || "") + (r.stderr || "");
   // A suite that matched zero test files exits 0 and prints tests=0: green with nothing run. The
   // tally is only trusted when it proves at least one test actually executed. Measured 2026-09-25:
@@ -81,7 +88,7 @@ const stage = (name, cmd, args, spawnOpts = {}) => {
   const counts = tally ? ` tests=${tally[1]} pass=${tally[2]} fail=${tally[3]} skip=${tally[4]}` : "";
   const marker = /AUDIT OK|DEPLOYMENT IN SYNC|ENGINE PROBE OK|N13 PARSER CHECK OK|MCP CONFIG OK|BRIDGE GUARD CHECK OK|DEPLOYED ACCEPTANCE OK(?: \([^)]*\))?/.exec(out);
   const failLine = out.split(/\r?\n/).filter((l) => /^(FAIL|DRIFT|✖ failing|N13 PARSER CHECK FAILURES|DEPLOYED ACCEPTANCE FAILURES|ENGINE PROBE FAILURES|AUDIT FAILURES|DEPLOYMENT DRIFT)/.test(l)).slice(0, 4).join(" | ");
-  rows.push(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(34)} ${secs.toFixed(1).padStart(7)}s exit=${r.status}${counts}${marker ? " [" + marker[0] + "]" : ""}`);
+  rows.push(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(34)} ${secs.toFixed(1).padStart(7)}s exit=${r.status}${killed ? ` signal=${r.signal ?? "none"}` : ""}${counts}${marker ? " [" + marker[0] + "]" : ""}`);
   const row = rows[rows.length - 1];
   if (!ok && failLine) rows.push(`        ↳ ${failLine.slice(0, 400)}`);
   if (!ok) {
@@ -117,7 +124,7 @@ stage("audit: built artifact + parity", "node", [`${T}/audit-build-924.mjs`]);
 // 2026-09-26: a 12 s test under these exact flags ran 12006 ms and exited 0). Without it, the one
 // uncapped poll loop in the suite (`waitForFile(apply-state.json)`) would hang this authoritative run
 // forever instead of reddening it. 600 s is >3x the slowest legitimate test measured in-gate (167 s).
-if (!fast) stage("TS suite", "node", ["--test", "--test-concurrency=1", "--test-timeout=600000", "tests/**/*.test.ts"]);
+if (!fast) stage("TS suite", "node", ["--test", "--test-concurrency=1", "--test-timeout=600000", "tests/**/*.test.ts"], { timeout: 30 * 60_000 });
 stage("probe: numstat parser (repo)", "node", [`${T}/n13b924.mjs`]);
 // Two premises that wave-24 code decisions rest on, re-checked every run: the repo-shape claim was
 // REFUTED (so the engine deliberately has no sparse/submodule gate), and the subdir-apply claim was
@@ -137,7 +144,11 @@ stage("probe: bridge init guard (python)", "python", ["docs/proof/tools/bridge-g
 // it shares the --no-real switch with the engine's real-model legs.
 if (!noReal) stage("accept: TS live model cycle", "node", [`${T}/accept-ts-924.mjs`]);
 stage("probe: security invariants (repo engine)", "node", [`${T}/probe-any-924.mjs`], { env: { ...process.env, PROBE_ENGINE: `${REPO}/minimax-code-plugin/.minimax-plugin/mcp-server.mjs` } });
-if (!fast) stage("engine e2e suite", "node", ["--test", "minimax-code-plugin/tests/e2e.test.mjs"]);
+// The engine suite has no stage-level --test-timeout of its own in the flags below? It does now:
+// 11 of its 57 tests declare no per-test timeout, and Node v24's default is unlimited (measured
+// 2026-09-28), so without this flag a wedged engine case hangs the stage until the 30 min budget.
+// 600 s > 3x the longest declared per-test budget in that file (420 s).
+if (!fast) stage("engine e2e suite", "node", ["--test", "--test-timeout=600000", "minimax-code-plugin/tests/e2e.test.mjs"], { timeout: 30 * 60_000 });
 // Drain gap: the e2e suite's last cases kill engines, and an engine's shutdown wait is capped at 60 s
 // (its cleanup has to reap process trees). Measured on the 2026-09-25 21:35 rehearsal: the very next
 // stage's first tests ran 14x slow and two went red on candidate/validation budgets alone, while both

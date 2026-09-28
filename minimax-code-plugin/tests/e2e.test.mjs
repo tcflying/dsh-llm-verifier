@@ -334,22 +334,22 @@ test("best-of-N 全状态机", async () => {
   assert.equal(git("worktree", "list").stdout.trim().split(/\r?\n/).length, 1, "候选 worktree 应已移除");
   assert.equal(git("branch", "--list", "llm-verifier/*").stdout.trim(), "", "候选分支应已删除");
 
-  assert.match((await tool("apply_verified_winner", { runId: run.runId })).__error, /expected winner_selected/);
+  assert.match((await tool("apply_verified_winner", { runId: run.runId, confirm: true })).__error, /expected winner_selected/);
   assert.match((await tool("select_verified_candidate", { runId: run.runId, candidateId: "candidate-9" })).__error, /unknown candidateId/);
 
   assert.equal((await tool("select_verified_candidate", { runId: run.runId, candidateId: "candidate-2" })).status, "winner_selected");
-  assert.equal((await tool("apply_verified_winner", { runId: run.runId })).status, "applied");
+  assert.equal((await tool("apply_verified_winner", { runId: run.runId, confirm: true })).status, "applied");
   assert.match(fs.readFileSync(path.join(repo, "solution.txt"), "utf8"), /candidate-2/);
 
   assert.equal((await tool("rollback_verified_winner", { runId: run.runId })).status, "rolled_back");
   assert.equal(fs.existsSync(path.join(repo, "solution.txt")), false, "回滚后文件应消失");
 
   // rolled_back 是合法重落地态（DSH parity，踩坑 #4）
-  assert.equal((await tool("apply_verified_winner", { runId: run.runId })).status, "applied");
+  assert.equal((await tool("apply_verified_winner", { runId: run.runId, confirm: true })).status, "applied");
   assert.equal((await tool("rollback_verified_winner", { runId: run.runId })).status, "rolled_back");
 
   // 落地后被人工改过 → 反向补丁不干净 → 拒绝回滚
-  await tool("apply_verified_winner", { runId: run.runId });
+  await tool("apply_verified_winner", { runId: run.runId, confirm: true });
   fs.writeFileSync(path.join(repo, "solution.txt"), "hand edited\n");
   assert.match((await tool("rollback_verified_winner", { runId: run.runId })).__error, /rollback refused/);
   git("checkout", "--", "solution.txt");
@@ -396,7 +396,7 @@ test("G0 安全护栏：模型名注入拒绝 / runId 穿越拒绝 / 坏帧不�
   await tool("verifier_configure", { candidateModel: "" });
   // A2：runId 直接 join 进 RUNS_DIR 路径，穿越格式必须在 loadRun 入口拒掉
   assert.match((await tool("select_verified_candidate", { runId: "../../evil", candidateId: "candidate-1" })).__error, /invalid runId/);
-  assert.match((await tool("apply_verified_winner", { runId: "..\\..\\x\\manifest" })).__error, /invalid runId/);
+  assert.match((await tool("apply_verified_winner", { runId: "..\\..\\x\\manifest", confirm: true })).__error, /invalid runId/);
   assert.match((await tool("rollback_verified_winner", { runId: "nope" })).__error, /invalid runId/);
   // A5：截断的 manifest 必须报"损坏"而不是"不存在"（回滚线索不能被状态写入本身销毁）
   const fakeDir = path.join(dir, "data-main", "runs", "20200101000000-abcdef");
@@ -551,7 +551,7 @@ test("validationCommand 必须真的执行；落盘状态 == 返回状态；空�
     const { runId, runDir } = seedRun(e, {
       name: "a", repoPath: r.p, patchText: patch, validationCommand: failCmd,
     });
-    const out = await e.tool("apply_verified_winner", { runId });
+    const out = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.equal(out.validation?.status, "failed", `失败命令必须报失败: ${JSON.stringify(out)}`);
     assert.equal(out.validation?.exitCode, 3, "退出码要能穿过 shell 传回来（cmd /c 手工拼接时会变成 0）");
     assert.equal(fs.existsSync(path.join(r.p, "validation-ran.txt")), true, "验证命令没被执行 = 校验是假的");
@@ -567,7 +567,7 @@ test("validationCommand 必须真的执行；落盘状态 == 返回状态；空�
 
     // 空补丁 = 抓取失败，不能当"已验证成果"落地（git 自己的 "no valid patches" 报错不算拦住）
     const empty = seedRun(e, { name: "b", repoPath: r.p, patchText: "", validationCommand: failCmd });
-    assert.match((await e.tool("apply_verified_winner", { runId: empty.runId })).__error,
+    assert.match((await e.tool("apply_verified_winner", { runId: empty.runId, confirm: true })).__error,
       /winner patch .* is empty/);
   } finally { await e.close(); }
 });
@@ -825,7 +825,7 @@ test("apply_verified_winner 可取消：复验被掐掉后不得回报成功", {
       `setTimeout(function(){require('fs').writeFileSync('${vdone}','x');process.exit(0)},20000)"`;
     // seedRun 用 name 的末位拼 runId，而 runId 必须是 6 位十六进制 → 末位得是个 hex 字符
     const { runId } = seedRun(e, { name: "revalidate1", repoPath: r.p, patchText: patch, validationCommand: slowOk });
-    const p = e.tool("apply_verified_winner", { runId }).catch(() => ({}));
+    const p = e.tool("apply_verified_winner", { runId, confirm: true }).catch(() => ({}));
     // apply 若在复验启动前就返回，那是前置检查拒的 —— 报错要点名是哪一条，别只说"没跑起来"
     const early = await Promise.race([until(vhit, 150_000).then(() => null), p]);
     assert.equal(early, null, `apply 在复验启动前就返回了: ${JSON.stringify(early)}`);
@@ -931,7 +931,7 @@ test("非 UTF-8 内容必须按字节进补丁、按字节落地", { timeout: 18
     const patch = fs.readFileSync(run.candidates[0].patchPath);
     assert.ok(patch.includes(RAW), `补丁必须原样携带非 UTF-8 字节:\n${JSON.stringify(patch.slice(0, 300).toString("latin1"))}`);
     assert.equal(patch.includes(REPLACEMENT), false, "补丁里出现 U+FFFD = 抓取按 utf8 解码过，字节已被改写");
-    assert.equal((await e.tool("apply_verified_winner", { runId: run.runId })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId: run.runId, confirm: true })).status, "applied");
     assert.deepEqual(fs.readFileSync(path.join(r.p, "legacy.txt")),
       Buffer.concat([original, APPEND]), "落地后的字节必须与候选写下的字节逐字节相等");
   } finally { await e.close(); }
@@ -1097,7 +1097,7 @@ test("apply 的文件清单不得被缓冲区上限掐成半条", { timeout: 180
   try {
     // validationCommand 为空：这条测要的是清单，不是复验，别让 10 秒的 npm 噪音掺进来。
     const { runId } = seedRun(e, { name: "numstat1", repoPath: r.p, patchText: manyFilePatch(), validationCommand: "" });
-    const out = await e.tool("apply_verified_winner", { runId });
+    const out = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.equal(out.status, "applied", JSON.stringify(out));
     assert.ok(out.appliedFiles, `清单读不回来时必须报 unknown，而不是给一份截断的: ${JSON.stringify(out.appliedFiles)}`);
     assert.equal(out.appliedFiles.length, N, `文件清单被截断了: ${out.appliedFiles.length}/${N}`);
@@ -1184,13 +1184,13 @@ test("G0：kill switch 必须对'入队后才被停用'的那一枪生效（授�
     const patchB = makePatch(rB, "featureB.txt", "must not land\n");
     const { runId: idB } = seedRun(e, { name: "ks-b2", repoPath: rB.p, patchText: patchB, validationCommand: "" });
 
-    const pA = e.tool("apply_verified_winner", { runId: idA });
+    const pA = e.tool("apply_verified_winner", { runId: idA, confirm: true });
     assert.ok(await until(hold, 60_000),
       "applyA 没进到复验阶段 = 它没占住 mutationTurn，本测失去意义");
 
     // 队列此刻被 applyA 按住：configure 与 applyB 都排在它后面。
     const pCfg = e.tool("verifier_configure", { enabled: false });
-    const pB = e.tool("apply_verified_winner", { runId: idB });
+    const pB = e.tool("apply_verified_winner", { runId: idB, confirm: true });
 
     const cfg = await pCfg;
     assert.equal(cfg.saved, true, `kill switch 必须真的保存了: ${JSON.stringify(cfg)}`);
@@ -1218,7 +1218,7 @@ test("G1 apply：脏工作区状态读不出来时必须拒绝，而不是当成
     r.g("add", "-A");
     fs.writeFileSync(path.join(r.p, "tracked.txt"), "uncommitted local work changed again\n");
     fs.writeFileSync(path.join(r.p, ".git", "index"), "GARBAGEGARBAGEGARBAGE");
-    const out = await e.tool("apply_verified_winner", { runId });
+    const out = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.match(String(out.__error), /cannot read working-tree state/,
       `读不出工作区状态时必须是这个原因: ${JSON.stringify(out)}`);
     assert.equal(fs.existsSync(path.join(r.p, "feature.txt")), false,
@@ -1306,7 +1306,7 @@ test("G3：rollback 只认那三个真的落了补丁的状态，别按前缀认
   try {
     const patch = makePatch(r, "feature.txt", "added\n");
     const { runId } = seedRun(e, { name: "relg1", repoPath: r.p, patchText: patch, validationCommand: "" });
-    assert.equal((await e.tool("apply_verified_winner", { runId })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId, confirm: true })).status, "applied");
     // 补丁此刻真的在树里；把状态改成一个"以 applied 开头但并不表示已落地"的未来字面量。
     const manPath = path.join(e.dataDir, "runs", runId, "manifest.json");
     const man = readManifest(manPath);
@@ -1322,7 +1322,7 @@ test("G3：rollback 只认那三个真的落了补丁的状态，别按前缀认
     // 补丁再盖一遍。
     man.status = "winner_selected";
     fs.writeFileSync(manPath, JSON.stringify(man, null, 2));
-    assert.match(String((await e.tool("apply_verified_winner", { runId })).__error),
+    assert.match(String((await e.tool("apply_verified_winner", { runId, confirm: true })).__error),
       /already has an applied patch/, "重落地必须由 apply-state 把手拦住");
     // 合法状态照常可回滚（放宽判据必须配一枚绿对照）。
     man.status = "applied";
@@ -1342,7 +1342,7 @@ test("S12：把手读不出不得顶掉回滚入口，manifest 明说 applied �
   try {
     const patch = makePatch(r, "feature.txt", "added\n");
     const { runId } = seedRun(e, { name: "bhd0", repoPath: r.p, patchText: patch, validationCommand: "" });
-    assert.equal((await e.tool("apply_verified_winner", { runId })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId, confirm: true })).status, "applied");
     const stPath = path.join(e.dataDir, "runs", runId, "apply-state.json");
     // 前提先钉住：这条测判的是"坏把手"，把手若压根没被写过，测的就是别的东西并且会空转。
     assert.equal(fs.existsSync(stPath), true, "前提：apply 必须在改树之前落下把手");
@@ -1358,7 +1358,7 @@ test("S12：把手读不出不得顶掉回滚入口，manifest 明说 applied �
     // 有效凭据能授权反向 apply，此时拒绝才是对的。
     const r2 = mkRepo("badhandlerrepo2");
     const { runId: id2 } = seedRun(e, { name: "bhd1", repoPath: r2.p, patchText: makePatch(r2, "f2.txt", "x\n"), validationCommand: "" });
-    assert.equal((await e.tool("apply_verified_winner", { runId: id2 })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId: id2, confirm: true })).status, "applied");
     const man2 = path.join(e.dataDir, "runs", id2, "manifest.json");
     const m2 = readManifest(man2);
     m2.status = "winner_selected"; // 假装终态写盘被吞：这正是把手存在的理由
@@ -1379,7 +1379,7 @@ test("S15：无关提交不得拦掉一次可证明安全的回滚（精确判�
   const r = mkRepo("unrelatedrepo");
   try {
     const { runId } = seedRun(e, { name: "una0", repoPath: r.p, patchText: makePatch(r, "win.txt", "candidate\n"), validationCommand: "" });
-    assert.equal((await e.tool("apply_verified_winner", { runId })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId, confirm: true })).status, "applied");
     fs.writeFileSync(path.join(r.p, "unrelated.txt"), "the user's own work\n");
     r.g("add", "unrelated.txt");
     r.g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "unrelated work committed after the apply");
@@ -1414,7 +1414,7 @@ test("S16：回滚报成功时用户树必须干净（改动型补丁 + core.aut
     assert.equal(r.g("status", "--porcelain").stdout.trim(), "", "夹具前提：造完补丁后工作树要干净");
 
     const { runId } = seedRun(e, { name: "mod0", repoPath: r.p, patchText: d.stdout, validationCommand: "" });
-    const ap = await e.tool("apply_verified_winner", { runId });
+    const ap = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.equal(ap.status, "applied", `改动型补丁必须能落地，否则这条测走不到回滚: ${JSON.stringify(ap)}`);
     assert.match(fs.readFileSync(path.join(r.p, "f.txt"), "utf8"), /l2-edited/, "apply 之后文件要真的带上改动");
     const rb = await e.tool("rollback_verified_winner", { runId });
@@ -1442,7 +1442,7 @@ test("S13：回滚后残留的把手不得堵死 rolled_back → 再落地这条
   const r = mkRepo("stalehandlerrepo");
   try {
     const { runId } = seedRun(e, { name: "shd0", repoPath: r.p, patchText: makePatch(r, "feature.txt", "added\n"), validationCommand: "" });
-    assert.equal((await e.tool("apply_verified_winner", { runId })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId, confirm: true })).status, "applied");
     const stPath = path.join(e.dataDir, "runs", runId, "apply-state.json");
     // 把把手换成一个删不掉的目录：读它 ⇒ EISDIR（等于坏凭据），删它 ⇒ 抛错（等于 rm 失败）。
     fs.rmSync(stPath);
@@ -1465,7 +1465,7 @@ test("S13：回滚后残留的把手不得堵死 rolled_back → 再落地这条
       appliedAt: new Date().toISOString(),
     }));
 
-    const re = await e.tool("apply_verified_winner", { runId });
+    const re = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.equal(re.status, "applied",
       `第二步（本条的正主）：rolled_back + 盘上有删不掉的把手 ⇒ 仍须能再落地，而不是叫用户去回滚一次已完成的事: ${JSON.stringify(re)}`);
     assert.equal(fs.existsSync(path.join(r.p, "feature.txt")), true, "再落地要真的把文件放回去");
@@ -1481,13 +1481,13 @@ test("S14：HEAD 已经前进（用户提交了补丁）时回滚必须拒绝，
     // 绿对照：HEAD 不动时回滚照旧成功 —— 收紧判据必须配一枚"合法路径仍然要过"的对照。
     const r1 = mkRepo("headokrepo");
     const { runId: id1 } = seedRun(e, { name: "heda", repoPath: r1.p, patchText: makePatch(r1, "feature.txt", "added\n"), validationCommand: "" });
-    assert.equal((await e.tool("apply_verified_winner", { runId: id1 })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId: id1, confirm: true })).status, "applied");
     assert.equal((await e.tool("rollback_verified_winner", { runId: id1 })).status, "rolled_back",
       "HEAD 未动时新守卫不得拦住回滚");
 
     const r2 = mkRepo("headmovedrepo");
     const { runId: id2 } = seedRun(e, { name: "hedb", repoPath: r2.p, patchText: makePatch(r2, "f2.txt", "x\n"), validationCommand: "" });
-    assert.equal((await e.tool("apply_verified_winner", { runId: id2 })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId: id2, confirm: true })).status, "applied");
     r2.g("add", "-A");
     r2.g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "user committed the winner");
     const rb = await e.tool("rollback_verified_winner", { runId: id2 });
@@ -1527,7 +1527,7 @@ test("S4：复验预算走 validationTimeoutMin，不再是 apply 里硬编码�
     const man = readManifest(manPath);
     man.config.validationTimeoutMin = 0.05;
     fs.writeFileSync(manPath, JSON.stringify(man, null, 2));
-    const out = await e.tool("apply_verified_winner", { runId });
+    const out = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.equal(out.validation?.timedOut, true, `apply 的复验没走配置预算: ${JSON.stringify(out)}`);
     assert.equal(out.status, "applied_validation_failed", JSON.stringify(out));
     assert.equal(fs.existsSync(path.join(r.p, "feature.txt")), true, "复验超时不得顺手把补丁撤回");
@@ -1557,7 +1557,7 @@ test("S5：manifest 写不进去不得顶掉真结果，必须留下 manifest no
     man.candidates[0].validation.command = breaker;
     fs.writeFileSync(path.join(runDir, "manifest.json"), JSON.stringify(man, null, 2));
 
-    const out = await e.tool("apply_verified_winner", { runId });
+    const out = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.equal(out.__error, undefined, `凭据写不下去不得把 apply 变成一次错误: ${JSON.stringify(out)}`);
     assert.equal(out.status, "applied", `响应必须带真实状态: ${JSON.stringify(out)}`);
     assert.ok((out.internalErrors || []).some((s) => /manifest not written: /.test(s)),
@@ -1743,7 +1743,7 @@ test("S10：manifest 的 repoPath 不是仓库时，任何动作都必须拒绝"
     const man = readManifest(mpath);
     delete man.repoPath;                       // 旧版/手改 manifest 的形状
     fs.writeFileSync(mpath, JSON.stringify(man, null, 2));
-    const out = await e.tool("apply_verified_winner", { runId });
+    const out = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.match(String(out.__error), /repoPath is not an existing git work tree/,
       `必须是 loadRun 的点名拒绝，不能是碰巧的 git 报错: ${JSON.stringify(out)}`);
     assert.equal(fs.existsSync(path.join(r.p, "feature.txt")), false, "不得落在用户仓库里");
@@ -1789,7 +1789,7 @@ test("S17：回滚使用的补丁路径是记录里的值，必须先钉在 run 
     const { runId, runDir } = seedRun(e, {
       name: "pfna", repoPath: r.p, patchText: makePatch(r, "feature.txt", "added\n"), validationCommand: "",
     });
-    assert.equal((await e.tool("apply_verified_winner", { runId })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId, confirm: true })).status, "applied");
     const stPath = path.join(runDir, "apply-state.json");
     const record = () => JSON.parse(fs.readFileSync(stPath, "utf8"));
     const rewrite = (patchPath) => fs.writeFileSync(stPath, JSON.stringify({ ...record(), patchPath }));
@@ -1835,7 +1835,7 @@ test("S19：apply 侧的补丁路径同样来自凭据，必须先过 run 目录
     };
 
     tamper("--assume-unchanged");
-    let res = await e.tool("apply_verified_winner", { runId });
+    let res = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.match(res.__error, /not a usable file name/u, `选项形状必须先进 git 之前被拒: ${JSON.stringify(res)}`);
     untouched();
 
@@ -1843,12 +1843,12 @@ test("S19：apply 侧的补丁路径同样来自凭据，必须先过 run 目录
     // create does not exist and would trip the "no such file" branch instead of the containment branch.
     // What must be proven here is that an EXISTING file outside the run dir is refused before its hash.
     tamper(path.join(r.p, "base.js"));
-    res = await e.tool("apply_verified_winner", { runId });
+    res = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.match(res.__error, /outside the run directory/u, `越界但真实存在的路径必须停在哈希校验之前: ${JSON.stringify(res)}`);
     untouched();
 
     tamper(patchPath);
-    res = await e.tool("apply_verified_winner", { runId });
+    res = await e.tool("apply_verified_winner", { runId, confirm: true });
     assert.equal(res.status, "applied", `合法入口必须照旧能落地（对照臂）: ${JSON.stringify(res)}`);
     assert.equal(fs.existsSync(path.join(r.p, "feature.txt")), true, "对照臂要真的把补丁放回去");
   } finally { await e.close(); }
@@ -1865,7 +1865,7 @@ test("S20：并集里只有 appliedFiles 认识的路径时，提交了它就必
     const { runId, runDir } = seedRun(e, {
       name: "unaa", repoPath: r.p, patchText: makePatch(r, "feature.txt", "added\n"), validationCommand: "",
     });
-    assert.equal((await e.tool("apply_verified_winner", { runId })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId, confirm: true })).status, "applied");
     // 让 appliedFiles 比补丁头多知道一个路径：真实世界里 numstat 就是那个更全的来源，这里手工置成同一种
     // 形状（夹具能造的合法形态，TS 侧同理由 record.changedFiles 供）
     const mp = path.join(runDir, "manifest.json");
@@ -1885,7 +1885,7 @@ test("S20：并集里只有 appliedFiles 认识的路径时，提交了它就必
     // 绿对照：把那次提交换成一个并集都不认识的路径，同一份盘就得放行
     const r2 = mkRepo("unionrepo2");
     const s2 = seedRun(e, { name: "unab", repoPath: r2.p, patchText: makePatch(r2, "feature.txt", "added\n"), validationCommand: "" });
-    assert.equal((await e.tool("apply_verified_winner", { runId: s2.runId })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId: s2.runId, confirm: true })).status, "applied");
     const mp2 = path.join(s2.runDir, "manifest.json");
     const man2 = readManifest(mp2);
     man2.appliedFiles = ["feature.txt", "extra.txt"];
@@ -1913,7 +1913,7 @@ test("S18：非 ASCII 文件名的补丁不得把撤销门焊死", { timeout: 18
     // 夹具前提，不是装饰：这台机器的 git 若关了 core.quotepath，头行就没有引号，这条测会静默变成空转
     assert.match(patchText, /^diff --git "a\//mu, "前提不成立：这份 git 没有把非 ASCII 名字 C 引号化");
     const { runId } = seedRun(e, { name: "qpta", repoPath: r.p, patchText, validationCommand: "" });
-    assert.equal((await e.tool("apply_verified_winner", { runId })).status, "applied");
+    assert.equal((await e.tool("apply_verified_winner", { runId, confirm: true })).status, "applied");
     fs.writeFileSync(path.join(r.p, "unrelated.txt"), "other work\n");
     // 点名 add，不用 -A：-A 会把刚落地的 中文.py 一起提交进去，那条提交就真的动了被补丁的路径，
     // 夹具前提（"无关提交"）反过来被我的夹具证伪了。
@@ -2088,3 +2088,45 @@ test("R3：评审漏评的候选不得被印成 score 0", { timeout: 180_000 }, 
   } finally { await e.close(); }
 });
 
+
+// 928 P0-2：引擎没有宿主回调通道，审批 = 第二次调用。第一次调用必须跑完全部只读预检
+// （哈希/HEAD/脏树/apply --check）再给预览 —— 预览说"能落地"是可信的；不带 confirm 的
+// 调用不得碰树、不得落 apply-state 把手（否则预览本身就把 run 拖进半落地状态）。
+test("apply 两段式：无 confirm 只给预览且不动树，confirm:true 才落地", { timeout: 120_000 }, async () => {
+  const r = mkRepo("confirm-gate");
+  const patch = makePatch(r, "solution.txt", "fixed\n");
+  const { runId } = seedRun(eng, { name: "e1", repoPath: r.p, patchText: patch, validationCommand: "" });
+  const preview = await tool("apply_verified_winner", { runId });
+  assert.equal(preview.status, "approval_required", JSON.stringify(preview));
+  assert.equal(preview.winnerId, "candidate-1");
+  assert.ok(preview.patchSha256, "预览必须带上补丁哈希，这是宿主批准的对象");
+  assert.match(preview.nextStep, /confirm:\s*true/);
+  assert.equal(r.g("status", "--porcelain").stdout.trim(), "", "预览不得动工作树");
+  assert.ok(!fs.existsSync(path.join(eng.dataDir, "runs", runId, "apply-state.json")),
+    "预览不得落下 apply-state 把手");
+  const applied = await tool("apply_verified_winner", { runId, confirm: true });
+  assert.equal(applied.status, "applied", JSON.stringify(applied));
+  assert.ok(fs.existsSync(path.join(r.p, "solution.txt")), "confirm 后补丁真实落地");
+});
+
+// 928 C 工位：reverse apply 只还原工作树，index 里的 staged / intent-to-add 条目以 AD 残留 ——
+// apply 要求干净 index，于是本仓库的下一次 apply 会被这次 rollback 自己的残留卡死。rollback
+// 必须把这些路径 unstage 回 HEAD（TS 孪生：core.ts 的 reset 循环）。
+test("rollback 清 index：staged 残留不得卡死下一次 apply", { timeout: 120_000 }, async () => {
+  const r = mkRepo("reset-index");
+  const patch = makePatch(r, "solution.txt", "fixed\n");
+  const { runId } = seedRun(eng, { name: "e2", repoPath: r.p, patchText: patch, validationCommand: "" });
+  await tool("apply_verified_winner", { runId, confirm: true });
+  // 落地后把补丁文件 add 进 index：模拟 apply 路线本身会留下的 staged 形态（intent-to-add
+  // 同样以 A 开头显示）。没有 reset 的 rollback 会留下 "AD solution.txt"。
+  r.g("add", "solution.txt");
+  assert.match(r.g("status", "--porcelain").stdout, /^A\s+/);
+  const rb = await tool("rollback_verified_winner", { runId });
+  assert.equal(rb.status, "rolled_back", JSON.stringify(rb));
+  assert.equal(r.g("status", "--porcelain").stdout.trim(), "",
+    "rollback 后工作树与 index 都必须干净，否则下一次 apply 被卡死");
+  assert.ok(!fs.existsSync(path.join(r.p, "solution.txt")), "新增文件的补丁反向后文件应消失");
+  // 被卡死的样子必须不复现：同一 repo 上再落地一次（rolled_back → re-apply 是文档路径）。
+  const again = await tool("apply_verified_winner", { runId, confirm: true });
+  assert.equal(again.status, "applied", JSON.stringify(again));
+});

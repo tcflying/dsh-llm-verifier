@@ -1,0 +1,54 @@
+LOAD_START={"nodes":76,"foreign":52,"foreignMs":24274689,"unknownMs":0}
+PASS  typecheck                              3.5s exit=0
+PASS  build -> lib/                          4.4s exit=0
+PASS  audit: built artifact + parity         1.6s exit=0 [AUDIT OK]
+PASS  TS suite                             706.2s exit=0 tests=122 pass=120 fail=0 skip=2
+PASS  probe: numstat parser (repo)           0.6s exit=0 [N13 PARSER CHECK OK]
+PASS  probe: git repo-shape claims refuted     6.4s exit=0
+PASS  probe: git apply from subdir is a silent no-op     0.8s exit=0
+PASS  check: 924.md table blocks intact      0.5s exit=0
+PASS  probe: ledger checker is load-bearing     0.3s exit=0
+PASS  probe: bridge init guard (python)      0.1s exit=0 [BRIDGE GUARD CHECK OK]
+PASS  accept: TS live model cycle           20.1s exit=0
+PASS  probe: security invariants (repo engine)     2.8s exit=0 [ENGINE PROBE OK]
+PASS  engine e2e suite                     581.6s exit=0 tests=57 pass=57 fail=0 skip=0
+PASS  sync deployed copies                   0.3s exit=0 [DEPLOYMENT IN SYNC]
+PASS  gate: mcp.json vs agent-plugins schema     0.6s exit=0 [MCP CONFIG OK]
+PASS  probe: invariants (deployed 1)         1.2s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 1)        4.5s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 1)    75.9s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+PASS  probe: invariants (deployed 2)         1.5s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 2)        6.3s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 2)   112.8s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+
+================ FINAL GATE ================
+MODE: full suites · model cycles INCLUDED · --sync (installed copies WRITTEN)
+stages run: 21
+PASS  typecheck                              3.5s exit=0
+PASS  build -> lib/                          4.4s exit=0
+PASS  audit: built artifact + parity         1.6s exit=0 [AUDIT OK]
+PASS  TS suite                             706.2s exit=0 tests=122 pass=120 fail=0 skip=2
+PASS  probe: numstat parser (repo)           0.6s exit=0 [N13 PARSER CHECK OK]
+PASS  probe: git repo-shape claims refuted     6.4s exit=0
+PASS  probe: git apply from subdir is a silent no-op     0.8s exit=0
+PASS  check: 924.md table blocks intact      0.5s exit=0
+PASS  probe: ledger checker is load-bearing     0.3s exit=0
+PASS  probe: bridge init guard (python)      0.1s exit=0 [BRIDGE GUARD CHECK OK]
+PASS  accept: TS live model cycle           20.1s exit=0
+PASS  probe: security invariants (repo engine)     2.8s exit=0 [ENGINE PROBE OK]
+PASS  engine e2e suite                     581.6s exit=0 tests=57 pass=57 fail=0 skip=0
+PASS  sync deployed copies                   0.3s exit=0 [DEPLOYMENT IN SYNC]
+PASS  gate: mcp.json vs agent-plugins schema     0.6s exit=0 [MCP CONFIG OK]
+PASS  probe: invariants (deployed 1)         1.2s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 1)        4.5s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 1)    75.9s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+PASS  probe: invariants (deployed 2)         1.5s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 2)        6.3s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 2)   112.8s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+
+FINAL GATE: ALL LAYERS GREEN
+GATE_END=2026-09-26T04:49:33.693Z
+LOAD_START={"nodes":76,"foreign":52,"foreignMs":24274689,"unknownMs":0}
+LOAD_END={"nodes":67,"foreign":46,"foreignMs":25886015,"unknownMs":0}
+GATE_START=2026-09-26T04:22:54.328Z
+GATE_EXIT=0

@@ -27,6 +27,18 @@ const MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024;
  * every path that does not.
  */
 const DEFAULT_GIT_TIMEOUT_MS = 10 * 60 * 1_000;
+// Operator override, same knob the engine reads: one env var tunes both layers together, so a
+// box with a slow remote or a huge repo raises the ceiling once instead of hunting per-layer
+// constants. Invalid or non-positive values fall back to the default rather than disabling the
+// ceiling (a parse-failure that produced 0 or NaN would restore the very hang this exists to
+// prevent). Bound at one hour: an unbounded env is a footgun the engine does not have either.
+const GIT_TIMEOUT_FROM_ENV = (() => {
+  const raw = process.env.LLM_VERIFIER_GIT_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_GIT_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_GIT_TIMEOUT_MS;
+  return Math.min(parsed, 60 * 60 * 1_000);
+})();
 
 export interface RepositorySnapshot {
   readonly repositoryPath: string;
@@ -125,7 +137,7 @@ async function runGitRaw(
   repositoryPath: string,
   arguments_: readonly string[],
   signal?: AbortSignal,
-  timeoutMs: number = DEFAULT_GIT_TIMEOUT_MS,
+  timeoutMs: number = GIT_TIMEOUT_FROM_ENV,
 ): Promise<Buffer> {
   try {
     const { stdout } = await execFileAsync("git", [...arguments_], {

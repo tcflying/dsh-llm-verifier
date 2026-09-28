@@ -1,0 +1,38 @@
+PASS  typecheck                              3.0s exit=0
+PASS  build -> lib/                          3.8s exit=0
+PASS  audit: built artifact + parity         0.3s exit=0 [AUDIT OK]
+PASS  probe: numstat parser (repo)           0.6s exit=0 [N13 PARSER CHECK OK]
+PASS  gate: mcp.json vs agent-plugins schema     0.2s exit=0 [MCP CONFIG OK]
+PASS  accept: TS live model cycle           16.4s exit=0
+PASS  probe: security invariants (repo engine)     1.3s exit=0 [ENGINE PROBE OK]
+PASS  engine e2e suite (26+)               219.5s exit=0 tests=41 pass=41 fail=0 skip=0
+PASS  TS suite                             127.8s exit=0 tests=96 pass=94 fail=0 skip=2
+PASS  sync deployed copies                   0.1s exit=0 [DEPLOYMENT IN SYNC]
+PASS  probe: invariants (deployed 1)         0.6s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 1)        1.8s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 1)    45.2s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+PASS  probe: invariants (deployed 2)         0.8s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 2)        1.6s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 2)    47.1s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+
+================ FINAL GATE ================
+MODE: full suites · model cycles INCLUDED · --sync (installed copies WRITTEN)
+stages run: 16
+PASS  typecheck                              3.0s exit=0
+PASS  build -> lib/                          3.8s exit=0
+PASS  audit: built artifact + parity         0.3s exit=0 [AUDIT OK]
+PASS  probe: numstat parser (repo)           0.6s exit=0 [N13 PARSER CHECK OK]
+PASS  gate: mcp.json vs agent-plugins schema     0.2s exit=0 [MCP CONFIG OK]
+PASS  accept: TS live model cycle           16.4s exit=0
+PASS  probe: security invariants (repo engine)     1.3s exit=0 [ENGINE PROBE OK]
+PASS  engine e2e suite (26+)               219.5s exit=0 tests=41 pass=41 fail=0 skip=0
+PASS  TS suite                             127.8s exit=0 tests=96 pass=94 fail=0 skip=2
+PASS  sync deployed copies                   0.1s exit=0 [DEPLOYMENT IN SYNC]
+PASS  probe: invariants (deployed 1)         0.6s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 1)        1.8s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 1)    45.2s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+PASS  probe: invariants (deployed 2)         0.8s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 2)        1.6s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 2)    47.1s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+
+FINAL GATE: ALL LAYERS GREEN

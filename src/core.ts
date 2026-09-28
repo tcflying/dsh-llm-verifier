@@ -97,6 +97,10 @@ const APPLY_RESULT_FILE = "apply-result.json";
 const ROLLBACK_RESULT_FILE = "rollback-result.json";
 const LOCK_HEARTBEAT_INTERVAL_MS = 5_000;
 const LOCK_STALE_AFTER_MS = 60_000;
+// Lock identity is compared at acquire, assert and release time; reading the live OS hostname at
+// each site let a mid-process rename flip the assert's verdict on a lock this process still holds.
+// One snapshot at module load is the identity every comparison uses (P7 review, 2026-09-28).
+const PROCESS_HOSTNAME = hostname();
 
 /** Every post-apply validation verdict has to carry the same two facts - the tree
  * is already changed, and rollback is the way out - because the host renders only
@@ -338,7 +342,7 @@ async function assertStillHoldingLock(stateDirectory: string, repositoryPath: st
   } catch {
     return;
   }
-  if (recorded !== null && recorded.pid === process.pid && recorded.hostname === hostname()) {
+  if (recorded !== null && recorded.pid === process.pid && recorded.hostname === PROCESS_HOSTNAME) {
     return;
   }
   throw new Error(
@@ -355,14 +359,14 @@ async function assertStillHoldingLock(stateDirectory: string, repositoryPath: st
  * process. An exclusive record keyed on the canonical repository path also
  * covers a second session (IDE plus CLI) driving the same repository.
  */
-async function acquireRepositoryLock(
+export async function acquireRepositoryLock(
   stateDirectory: string,
   repositoryPath: string,
 ): Promise<() => Promise<void>> {
   const lockDirectory = join(stateDirectory, "locks");
   const lockPath = repositoryLockPath(stateDirectory, repositoryPath);
   await mkdir(lockDirectory, { recursive: true, mode: 0o700 });
-  const hostName = hostname();
+  const hostName = PROCESS_HOSTNAME;
   const lockRecord = () => `${JSON.stringify({
     repositoryPath,
     pid: process.pid,
@@ -428,12 +432,28 @@ async function acquireRepositoryLock(
     heartbeat.unref();
     return async () => {
       clearInterval(heartbeat);
-      // A Windows unlink of a lock file still held open by an antivirus scan
-      // raises EPERM after an operation that already succeeded; failing the
-      // release would replace that result with an error (and on rollback, cost
-      // the user their `rollback-result.json` for a tree already reverted).
-      // The stale record is reclaimed by the heartbeat check instead.
-      await rm(lockPath, { force: true }).catch(() => {});
+      // Deleting unconditionally would remove whoever re-seated on this path while
+      // this holder sat silent past LOCK_STALE_AFTER_MS - `judgeLock` exists exactly
+      // so a second operation can legally take over that tree, and this one must
+      // not then delete the new holder's lock on its way out. Re-read the record
+      // and remove the file only when it still names this process. Every other
+      // shape - a foreign identity, a torn rewrite (indistinguishable from this
+      // holder's own heartbeat window), a file already gone - is left in place:
+      // a stale lock is reclaimed by the takeover path above, a deleted live
+      // lock is not recoverable at all.
+      let recorded: LockRecord | null | undefined;
+      try {
+        recorded = await readOptionalJson(lockPath) as LockRecord | null;
+      } catch {
+        recorded = undefined;
+      }
+      if (recorded !== null && recorded !== undefined && recorded.pid === process.pid && recorded.hostname === hostName) {
+        // A Windows unlink of a lock file still held open by an antivirus scan
+        // raises EPERM after an operation that already succeeded; failing the
+        // release would replace that result with an error (and on rollback, cost
+        // the user their `rollback-result.json` for a tree already reverted).
+        await rm(lockPath, { force: true }).catch(() => {});
+      }
     };
   };
   // Windows reports EPERM for touching a file another process has open, and every
@@ -2650,6 +2670,12 @@ export async function rollbackVerifiedWinner(
         );
       }
     }
+    // Everything above only read; everything below writes (reverse-apply,
+    // checkout, rm, index reset). A peer that re-seated on this tree while those
+    // reads ran would have its lock's silence mistaken for abandonment and its
+    // fresh work reverted blind - so re-assert ownership before the first
+    // destructive step, the same re-check apply makes inside its validation loop.
+    await assertStillHoldingLock(stateDirectory, repository.repositoryPath);
     if (revertByReverseApply) {
       // Exact for the verified bytes, and it keeps an edit the user made
       // outside the patch's hunks instead of clobbering it with HEAD.

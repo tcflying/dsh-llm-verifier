@@ -1,0 +1,57 @@
+LOAD_START={"nodes":67,"foreign":46,"foreignMs":17722764,"unknownMs":0}
+PASS  typecheck                              3.9s exit=0
+PASS  build -> lib/                          3.2s exit=0
+PASS  audit: built artifact + parity         0.2s exit=0 [AUDIT OK]
+PASS  probe: numstat parser (repo)           0.6s exit=0 [N13 PARSER CHECK OK]
+PASS  probe: git repo-shape claims refuted     5.0s exit=0
+PASS  probe: git apply from subdir is a silent no-op     0.7s exit=0
+PASS  check: 924.md table blocks intact      0.1s exit=0
+PASS  probe: ledger checker is load-bearing     0.9s exit=0
+PASS  probe: bridge init guard (python)      0.5s exit=0 [BRIDGE GUARD CHECK OK]
+PASS  accept: TS live model cycle           23.4s exit=0
+PASS  probe: security invariants (repo engine)     2.2s exit=0 [ENGINE PROBE OK]
+PASS  engine e2e suite                     852.3s exit=0 tests=57 pass=57 fail=0 skip=0
+FAIL  TS suite                             973.5s exit=1 tests=121 pass=116 fail=3 skip=2
+        ↳ ✖ failing tests:
+        ↳ full output kept: C:/Users/datoo/AppData/Local/Temp/gate-fail-ts-suite.log
+PASS  sync deployed copies                   0.5s exit=0 [DEPLOYMENT IN SYNC]
+PASS  gate: mcp.json vs agent-plugins schema     0.2s exit=0 [MCP CONFIG OK]
+PASS  probe: invariants (deployed 1)         2.3s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 1)       19.1s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 1)   134.9s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+PASS  probe: invariants (deployed 2)         2.3s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 2)        3.4s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 2)    83.2s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+
+================ FINAL GATE ================
+MODE: full suites · model cycles INCLUDED · --sync (installed copies WRITTEN)
+stages run: 21
+PASS  typecheck                              3.9s exit=0
+PASS  build -> lib/                          3.2s exit=0
+PASS  audit: built artifact + parity         0.2s exit=0 [AUDIT OK]
+PASS  probe: numstat parser (repo)           0.6s exit=0 [N13 PARSER CHECK OK]
+PASS  probe: git repo-shape claims refuted     5.0s exit=0
+PASS  probe: git apply from subdir is a silent no-op     0.7s exit=0
+PASS  check: 924.md table blocks intact      0.1s exit=0
+PASS  probe: ledger checker is load-bearing     0.9s exit=0
+PASS  probe: bridge init guard (python)      0.5s exit=0 [BRIDGE GUARD CHECK OK]
+PASS  accept: TS live model cycle           23.4s exit=0
+PASS  probe: security invariants (repo engine)     2.2s exit=0 [ENGINE PROBE OK]
+PASS  engine e2e suite                     852.3s exit=0 tests=57 pass=57 fail=0 skip=0
+FAIL  TS suite                             973.5s exit=1 tests=121 pass=116 fail=3 skip=2
+        ↳ ✖ failing tests:
+        ↳ full output kept: C:/Users/datoo/AppData/Local/Temp/gate-fail-ts-suite.log
+PASS  sync deployed copies                   0.5s exit=0 [DEPLOYMENT IN SYNC]
+PASS  gate: mcp.json vs agent-plugins schema     0.2s exit=0 [MCP CONFIG OK]
+PASS  probe: invariants (deployed 1)         2.3s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 1)       19.1s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 1)   134.9s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+PASS  probe: invariants (deployed 2)         2.3s exit=0 [ENGINE PROBE OK]
+PASS  accept: stub cycle (deployed 2)        3.4s exit=0 [DEPLOYED ACCEPTANCE OK (stub)]
+PASS  accept: REAL model cycle (deployed 2)    83.2s exit=0 [DEPLOYED ACCEPTANCE OK (real mcode)]
+
+FINAL GATE: 1 FAILING STAGES
+GATE_END=2026-09-26T03:12:03.194Z
+LOAD_END={"nodes":63,"foreign":42,"foreignMs":19939969,"unknownMs":0}
+GATE_START=2026-09-26T02:35:43.324Z
+GATE_EXIT=1
